@@ -1,0 +1,82 @@
+name: validate
+
+on:
+  push:
+  pull_request:
+  schedule:
+    # Home Assistant and HACS both tighten their rules over time; a monthly run
+    # catches a break before a user does.
+    - cron: "0 4 1 * *"
+  workflow_dispatch:
+
+jobs:
+  hassfest:
+    name: Home Assistant hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: HACS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration
+          # This repository has no entry in the Home Assistant brands
+          # repository, which HACS checks for. Adding one is a pull request
+          # against home-assistant/brands and cannot be done from here.
+          ignore: brands
+
+  tests:
+    name: Hebrew logic tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install pytest
+      - run: python -m pytest tests -q
+
+  json:
+    name: JSON and translations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Every JSON file parses, and every string is translated
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys
+
+          root = pathlib.Path("custom_components/needle_assist")
+          for path in pathlib.Path(".").rglob("*.json"):
+              json.loads(path.read_text(encoding="utf-8"))
+          print("all JSON parses")
+
+          def keys(node, prefix=""):
+              found = set()
+              for key, value in node.items():
+                  found.add(prefix + key)
+                  if isinstance(value, dict):
+                      found |= keys(value, prefix + key + ".")
+              return found
+
+          base = json.loads((root / "strings.json").read_text(encoding="utf-8"))
+          failed = False
+          for path in sorted((root / "translations").glob("*.json")):
+              have = keys(json.loads(path.read_text(encoding="utf-8")))
+              missing = keys(base) - have
+              extra = have - keys(base)
+              if missing or extra:
+                  failed = True
+                  print(f"{path.name}: missing {sorted(missing)} extra {sorted(extra)}")
+              else:
+                  print(f"{path.name}: complete")
+          sys.exit(1 if failed else 0)
+          PY

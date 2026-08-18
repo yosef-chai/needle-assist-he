@@ -1,0 +1,42 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Needle Assist (Hebrew)",
+        "description": "A fully local Hebrew voice assistant. Nothing runs in the cloud and nothing leaves the house.\n\nThe tuned Hebrew model ships with the integration, so you can submit this form empty. Only fill the field in if you want to run your own fine-tuned .cact file instead.",
+        "data": {
+          "weights_path": "Path to your own .cact file (optional)"
+        },
+        "data_description": {
+          "weights_path": "Leave empty to use the model that came with the integration."
+        }
+      }
+    },
+    "error": {
+      "weights_not_found": "No file at that path. Home Assistant must be able to read it — inside a container, use a path under /config.",
+      "weights_not_cact": "Needs a .cact file produced by `needle build`, not a .pkl checkpoint.",
+      "weights_missing": "The bundled model is not present in this installation, so a path is required. Reinstall the integration, or point this at a .cact file yourself."
+    },
+    "abort": {
+      "already_configured": "Needle Assist is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Needle Assist options",
+        "description": "Every default here is the value that measured best. Change them only if you know why.",
+        "data": {
+          "refuse_off_topic": "Refuse utterances that are not about the house",
+          "max_new_tokens": "Maximum tokens to generate per utterance",
+          "min_confidence": "Minimum confidence to act (0 disables gating)"
+        },
+        "data_description": {
+          "refuse_off_topic": "On by default. The model itself never refuses anything — measured at 0.0% correct refusal — so without this a question about the weather in Paris can move a device. Turning it off lets the model answer everything, including the things it should not.",
+          "max_new_tokens": "A tool call is about 25 tokens. The extra room is for multi-command sentences; raising it does not make answers better.",
+          "min_confidence": "Leave at 0 for a fine-tuned model. Fine-tuning does not update the confidence head, and correct non-English calls have been measured at 0.0, so any threshold above 0 would reject valid Hebrew commands."
+        }
+      }
+    }
+  }
+}

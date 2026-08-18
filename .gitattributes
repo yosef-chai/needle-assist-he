@@ -1,0 +1,6 @@
+# The model is a binary archive; never let a checkout rewrite its line endings.
+*.cact binary
+
+# These run under bash. A CRLF checkout turns `set -euo pipefail` into an
+# invalid option name, with no hint that the file is the problem.
+*.sh text eol=lf

@@ -1,0 +1,700 @@
+[
+  {
+    "name": "light_turn_on",
+    "description": "Turn on lights, optionally set brightness or color",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        },
+        "brightness_pct": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Absolute brightness percent"
+        },
+        "brightness_step_pct": {
+          "type": "integer",
+          "minimum": -100,
+          "maximum": 100,
+          "description": "Relative change, negative dims"
+        },
+        "color_name": {
+          "type": "string",
+          "enum": [
+            "red",
+            "green",
+            "blue",
+            "yellow",
+            "orange",
+            "purple",
+            "pink",
+            "white",
+            "warm_white",
+            "cool_white"
+          ]
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "light_turn_off",
+    "description": "Turn off the lights in an area",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "light_toggle",
+    "description": "Toggle the lights in an area",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "climate_set_temperature",
+    "description": "Set air conditioner target temperature",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        },
+        "temperature": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 30,
+          "description": "Target degrees Celsius"
+        },
+        "temperature_step": {
+          "type": "integer",
+          "minimum": -10,
+          "maximum": 10,
+          "description": "Relative change, negative lowers"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "climate_set_hvac_mode",
+    "description": "Set air conditioner mode",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        },
+        "hvac_mode": {
+          "type": "string",
+          "enum": [
+            "off",
+            "heat",
+            "cool",
+            "heat_cool",
+            "auto",
+            "dry",
+            "fan_only"
+          ]
+        }
+      },
+      "required": [
+        "hvac_mode"
+      ]
+    }
+  },
+  {
+    "name": "climate_set_fan_mode",
+    "description": "Set air conditioner fan speed",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        },
+        "fan_mode": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "auto"
+          ]
+        }
+      },
+      "required": [
+        "fan_mode"
+      ]
+    }
+  },
+  {
+    "name": "climate_turn_off",
+    "description": "Turn off the air conditioner",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "fan_turn_on",
+    "description": "Turn on the fan, optionally set speed percent",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        },
+        "percentage": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "fan_turn_off",
+    "description": "Turn off the fan",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "fan_oscillate",
+    "description": "Enable or disable fan oscillation",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        },
+        "oscillating": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "oscillating"
+      ]
+    }
+  },
+  {
+    "name": "cover_open",
+    "description": "Open blinds, shutters or curtains",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "cover_close",
+    "description": "Close blinds, shutters or curtains",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "cover_stop",
+    "description": "Stop moving blinds or curtains",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "cover_set_position",
+    "description": "Set blind position, 0 closed 100 open",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "position"
+      ]
+    }
+  },
+  {
+    "name": "lock_lock",
+    "description": "Lock the smart lock",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "lock_unlock",
+    "description": "Unlock the smart lock",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "camera_turn_on",
+    "description": "Enable the camera",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "camera_turn_off",
+    "description": "Disable the camera",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "vacuum_start",
+    "description": "Start the robot vacuum, optionally in one area",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "vacuum_return_to_base",
+    "description": "Send the robot vacuum to its dock",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "vacuum_pause",
+    "description": "Pause the robot vacuum",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "vacuum_set_fan_speed",
+    "description": "Set vacuum suction power",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "fan_speed": {
+          "type": "string",
+          "enum": [
+            "silent",
+            "standard",
+            "medium",
+            "turbo"
+          ]
+        }
+      },
+      "required": [
+        "fan_speed"
+      ]
+    }
+  },
+  {
+    "name": "media_play",
+    "description": "Start or resume playback",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "media_pause",
+    "description": "Pause playback",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "media_next_track",
+    "description": "Skip to the next track",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "media_set_volume",
+    "description": "Set speaker volume percent",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        },
+        "volume_pct": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "volume_step_pct": {
+          "type": "integer",
+          "minimum": -100,
+          "maximum": 100,
+          "description": "Relative change, negative lowers"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "media_mute",
+    "description": "Mute or unmute the speaker",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        },
+        "is_volume_muted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "is_volume_muted"
+      ]
+    }
+  },
+  {
+    "name": "media_select_source",
+    "description": "Switch speaker or TV input source",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "spotify",
+            "youtube",
+            "radio",
+            "tv",
+            "bluetooth",
+            "airplay"
+          ]
+        }
+      },
+      "required": [
+        "source"
+      ]
+    }
+  },
+  {
+    "name": "switch_turn_on",
+    "description": "Turn on a smart plug or switch",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "description": "Optional plug name"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "switch_turn_off",
+    "description": "Turn off a smart plug or switch",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "description": "Optional plug name"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "scene_activate",
+    "description": "Activate a saved scene by name",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Scene name"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "script_run",
+    "description": "Run a saved script by name",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Script name"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "automation_turn_on",
+    "description": "Enable an automation by name",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "automation_turn_off",
+    "description": "Disable an automation by name",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "input_boolean_turn_on",
+    "description": "Turn on a helper toggle such as guest mode",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "input_boolean_turn_off",
+    "description": "Turn off a helper toggle such as guest mode",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "timer_start",
+    "description": "Start a countdown timer in minutes",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600
+        },
+        "name": {
+          "type": "string",
+          "description": "Optional label"
+        }
+      },
+      "required": [
+        "minutes"
+      ]
+    }
+  },
+  {
+    "name": "timer_cancel",
+    "description": "Cancel a countdown timer",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "notify_send",
+    "description": "Send a notification message",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string",
+          "description": "Message body"
+        }
+      },
+      "required": [
+        "message"
+      ]
+    }
+  },
+  {
+    "name": "get_state",
+    "description": "Answer a question about device or sensor state",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "type": "string",
+          "enum": [
+            "light",
+            "climate",
+            "fan",
+            "cover",
+            "lock",
+            "binary_sensor",
+            "sensor",
+            "media_player",
+            "switch",
+            "vacuum",
+            "input_boolean",
+            "timer"
+          ]
+        },
+        "area": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "domain"
+      ]
+    }
+  },
+  {
+    "name": "get_weather",
+    "description": "Answer a question about weather or forecast",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "day_offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 7,
+          "description": "0 today, 1 tomorrow"
+        }
+      },
+      "required": []
+    }
+  }
+]

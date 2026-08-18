@@ -1,0 +1,46 @@
+Needle Assist for Home Assistant (Hebrew)
+=========================================
+
+This repository bundles third-party work. Each item keeps the licence it was
+published under.
+
+
+1. The model — custom_components/needle_assist/needle_he.cact
+------------------------------------------------------------
+
+A LoRA fine-tune of Needle 2, merged and exported at 4-bit.
+
+    Base model : Cactus-Compute/needle2
+                 https://huggingface.co/Cactus-Compute/needle2
+    Licence    : Apache License, Version 2.0
+                 https://www.apache.org/licenses/LICENSE-2.0
+    Modified   : yes. Fine-tuned on a generated Hebrew smart-home corpus and
+                 exported with `needle build --bits 4`. The base weights are
+                 otherwise unaltered.
+
+Apache 2.0 permits redistribution of modified works provided the licence and
+this notice of modification travel with them. A full copy of the licence text
+is at LICENSES/Apache-2.0.txt.
+
+
+2. The engine — custom_components/needle_assist/needle_engine/
+--------------------------------------------------------------
+
+Four files copied byte-for-byte from `cactus-needle` 2.0.5, so that the
+integration does not have to declare a dependency that pulls the entire JAX
+training stack into Home Assistant. See needle_engine/VENDOR.md for the
+reasoning and for the test that keeps the copy honest.
+
+    Source  : https://github.com/cactus-compute/needle
+    Licence : MIT
+    Copyright (c) 2026 Cactus Compute
+
+The native library `libneedle.so` is NOT bundled. It is downloaded once, on
+first setup, from the same public Hugging Face repository, for the exact
+architecture and libc of the machine Home Assistant is running on.
+
+
+3. Everything else
+------------------
+
+MIT, see LICENSE.
