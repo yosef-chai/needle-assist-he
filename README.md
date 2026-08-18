@@ -94,7 +94,8 @@
 | זיהוי החדר (בקוד, לא במודל) | **99.0%** |
 | זיהוי חדר במילים נרדפות שלא נראו באימון | **100%** |
 | ניתוב לכלי הנכון (רשימה מקוצרת) | 98.5% |
-| שאלה שקיבלה כלי שמפעיל משהו | **0 מתוך 18,071** |
+| שאלות שקיבלו כלים לקריאה בלבד, ולכן לא יכלו להפעיל כלום | 82.0% |
+| פקודות אמיתיות שסווגו בטעות כשאלה | **0 מתוך 15,709** |
 | סירוב נכון לאמירות מחוץ לתחום | 73.9% |
 | פקודות אמיתיות שנדחו בטעות | 2.54% |
 
@@ -168,7 +169,8 @@ On 400 unseen held-out rows, and across all 18,806 generated rows:
 | room resolution (in code, not in the model) | **99.0%** |
 | room resolution, synonyms never seen in training | **100%** |
 | tool shortlist recall | 98.5% |
-| questions handed a tool that can actuate | **0 of 18,071** |
+| questions given read-only tools only, so they cannot actuate | 82.0% |
+| real commands wrongly classified as questions | **0 of 15,709** |
 | off-topic correctly refused | 73.9% |
 | real commands wrongly refused | 2.54% |
 
