@@ -103,23 +103,16 @@ class NeedleAssistOptionsFlow(OptionsFlow):
             vol.Optional(
                 CONF_MAX_TOKENS,
                 default=options.get(CONF_MAX_TOKENS, DEFAULT_MAX_TOKENS),
-            ): vol.All(
-                NumberSelector(
-                    NumberSelectorConfig(min=32, max=512, step=8,
-                                         mode=NumberSelectorMode.SLIDER)
-                ),
-                # The slider hands back a float and this reaches a ctypes call.
-                vol.Coerce(int),
+            ): NumberSelector(
+                NumberSelectorConfig(min=32, max=512, step=8,
+                                     mode=NumberSelectorMode.SLIDER)
             ),
             vol.Optional(
                 CONF_CONFIDENCE,
                 default=options.get(CONF_CONFIDENCE, DEFAULT_CONFIDENCE),
-            ): vol.All(
-                NumberSelector(
-                    NumberSelectorConfig(min=0.0, max=1.0, step=0.05,
-                                         mode=NumberSelectorMode.SLIDER)
-                ),
-                vol.Coerce(float),
+            ): NumberSelector(
+                NumberSelectorConfig(min=0.0, max=1.0, step=0.05,
+                                     mode=NumberSelectorMode.SLIDER)
             ),
         })
         return self.async_show_form(step_id="init", data_schema=schema)

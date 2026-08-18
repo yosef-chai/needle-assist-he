@@ -94,8 +94,11 @@ class NeedleConversationEntity(conversation.ConversationEntity):
         """Run one utterance through the model and act on the result."""
         response = intent.IntentResponse(language=user_input.language)
         options = self.entry.options
-        max_tokens = options.get(CONF_MAX_TOKENS, DEFAULT_MAX_TOKENS)
-        min_conf = options.get(CONF_CONFIDENCE, DEFAULT_CONFIDENCE)
+        # Coerced here rather than in the options schema: a slider hands back a
+        # float, max_new_tokens reaches a ctypes call, and a selector wrapped in
+        # vol.All does not reliably survive the frontend's schema serialisation.
+        max_tokens = int(options.get(CONF_MAX_TOKENS, DEFAULT_MAX_TOKENS))
+        min_conf = float(options.get(CONF_CONFIDENCE, DEFAULT_CONFIDENCE))
 
         # Refuse before inference, not after. The model's own refusal rate is
         # 0.0% and its false-actuation rate is ~100%, so left to itself it will
