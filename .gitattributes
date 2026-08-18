@@ -4,3 +4,6 @@
 # These run under bash. A CRLF checkout turns `set -euo pipefail` into an
 # invalid option name, with no hint that the file is the problem.
 *.sh text eol=lf
+
+# Brand images for the Home Assistant brands repository.
+*.png binary

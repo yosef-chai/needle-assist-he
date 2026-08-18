@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brands/custom_integrations/needle_assist/dark_icon.png">
+    <img src="brands/custom_integrations/needle_assist/icon.png" width="120" alt="Needle Assist">
+  </picture>
+</p>
+
 # Needle Assist — עוזר קולי בעברית ל‑Home Assistant
 
 [![validate](https://github.com/Yosef-Chai/needle-assist-he/actions/workflows/validate.yml/badge.svg)](https://github.com/Yosef-Chai/needle-assist-he/actions/workflows/validate.yml)
