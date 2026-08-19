@@ -193,6 +193,37 @@ eight degrees backwards, and a step too small is one the speaker repeats.
 
 ---
 
+## Eight slots the sentence supplies
+
+The room was the first one and it turned out to be a pattern. Whenever an
+argument is a *word the speaker actually said*, the sentence has it exactly and
+the model is guessing at a transliteration of it:
+
+| slot | read from the sentence as |
+|---|---|
+| `area` | the rooms this installation really has |
+| `name` | the scenes, scripts, timers and helpers it really has |
+| `message` | the span after the ש in "תגיד ל… ש…" |
+| `media_id`, `artist` | what is left after the kind word and the room |
+| `media_type` | האלבום / פלייליסט / רדיו / השיר |
+| `fan_speed` | שקט / רגיל / בינוני / חזק |
+| `fan_mode` | נמוך / בינוני / גבוה / אוטומטי |
+| `color_name` | אדום / סגול / לבן / חמים / קר |
+
+The last three were the newest, and taken together over the whole corpus the
+sentence **agrees with the label 808 times, disagrees 0 times**, says nothing
+1,906 times — where the model keeps its own answer — and never once fills a
+slot the label leaves empty.
+
+That last column is the one that took the most care. A *value* is a noun in a
+prepositional phrase — "בסגול", "לשקט", "וגבוה" — and does not take the prefixes
+a verb takes, which matters more than it sounds: read with the general Hebrew
+prefix chain, `להוריד` — *to lower* — is `ל` + `ה` + `ורוד`, and `ורוד` is
+*pink*. That reading asks for a pink light on 21 sentences that mention no
+colour at all.
+
+---
+
 ## Why the room is not resolved by the model
 
 The model was fine-tuned to emit one of twelve English area slugs —
