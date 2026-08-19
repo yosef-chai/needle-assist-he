@@ -53,29 +53,12 @@ from homeassistant.helpers import (
 
 from . import direction, slot_match, tool_router
 from .const import (
-    CONF_MUSIC_PLAYER, NON_SERVICE_ARGS, QUERY_TOOLS, SERVICE_MAP, TOOL_DOMAIN,
+    ALL_WHEN_UNNAMED, CONF_MUSIC_PLAYER, MUSIC_INTEGRATION, NAME_ADDRESSED,
+    NON_SERVICE_ARGS, QUERY_TOOLS, ROUTINE_SIBLING, SERVICE_MAP, TOOL_DOMAIN,
     WEATHER_STATES_HE,
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-# The integration whose media_player entities music_assistant.play_media can
-# target. Named once here because it is both the registry test and the reason
-# the tool degrades gracefully in a house that does not have it.
-MUSIC_INTEGRATION = "music_assistant"
-
-# Domains whose "name" argument identifies the entity itself rather than a
-# device inside an area: scene.evening, script.good_night, timer.pasta.
-NAME_ADDRESSED = {
-    "scene_activate": "scene",
-    "script_run": "script",
-    "automation_turn_on": "automation",
-    "automation_turn_off": "automation",
-    "input_boolean_turn_on": "input_boolean",
-    "input_boolean_turn_off": "input_boolean",
-    "timer_start": "timer",
-    "timer_cancel": "timer",
-}
 
 
 @dataclass
@@ -339,7 +322,18 @@ class CallExecutor:
             named_domain = NAME_ADDRESSED[tool]
             entity_ids = self._match_named(named_domain, utterance,
                                            args.get("name"))
-            if not entity_ids and not args.get("name"):
+            if not entity_ids and (sibling := ROUTINE_SIBLING.get(tool)):
+                # See ROUTINE_SIBLING: the registry knows whether this
+                # household's "אווירת ערב" is a scene or a script.
+                entity_ids = self._match_named(
+                    NAME_ADDRESSED[sibling], utterance, args.get("name"))
+                if entity_ids:
+                    _LOGGER.debug("%s is a %s here, not a %s", args.get("name"),
+                                  NAME_ADDRESSED[sibling], named_domain)
+                    tool = sibling
+                    domain, service = SERVICE_MAP[tool]
+            if (not entity_ids and not args.get("name")
+                    and tool in ALL_WHEN_UNNAMED):
                 # "cancel the timer" with nothing to disambiguate: all of them.
                 entity_ids = [s.entity_id
                               for s in self.hass.states.async_all(named_domain)]

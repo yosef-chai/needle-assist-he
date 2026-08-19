@@ -623,3 +623,37 @@ def test_play_and_pause_are_deliberately_not_guarded():
     """
     assert "media_play" not in DIRECTION.OPPOSITE
     assert DIRECTION.settle("media_play", "תעצור את הנגן בסלון") == "media_play"
+
+
+def test_a_routine_falls_back_to_its_sibling_domain_and_no_further():
+    """A scene and a script are the same act; an automation is not.
+
+    Home Assistant keeps a household's routines in three domains and a Hebrew
+    sentence cannot say which one "אווירת ערב" landed in. Both models trained
+    here confuse them. The registry knows, so a name absent from the domain the
+    model chose is looked for in the sibling one.
+
+    Automations are excluded on purpose: `automation.turn_on` *enables* an
+    automation rather than running it, so guessing wrong there would leave a
+    household with one quietly switched on.
+    """
+    assert CONST.ROUTINE_SIBLING == {"scene_activate": "script_run",
+                                     "script_run": "scene_activate"}
+    for tool, sibling in CONST.ROUTINE_SIBLING.items():
+        assert CONST.ROUTINE_SIBLING[sibling] == tool
+        assert tool in CONST.NAME_ADDRESSED and sibling in CONST.NAME_ADDRESSED
+        assert CONST.NAME_ADDRESSED[tool] != CONST.NAME_ADDRESSED[sibling]
+    assert not any(t.startswith("automation") for t in CONST.ROUTINE_SIBLING)
+
+
+def test_naming_nothing_means_all_of_them_only_for_timers():
+    """"בטל את הטיימר" means every timer. "תפעיל סצנה" does not mean every scene."""
+    assert CONST.ALL_WHEN_UNNAMED == {"timer_start", "timer_cancel"}
+    assert CONST.ALL_WHEN_UNNAMED <= set(CONST.NAME_ADDRESSED)
+    assert all(CONST.NAME_ADDRESSED[t] == "timer" for t in CONST.ALL_WHEN_UNNAMED)
+
+
+def test_every_name_addressed_tool_targets_a_real_domain():
+    for tool, domain in CONST.NAME_ADDRESSED.items():
+        assert tool in CONST.SERVICE_MAP, tool
+        assert CONST.SERVICE_MAP[tool][0] == domain, tool

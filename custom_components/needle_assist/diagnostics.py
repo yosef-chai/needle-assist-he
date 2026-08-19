@@ -31,8 +31,9 @@ from homeassistant.helpers import entity_registry as er
 
 from . import slot_match, tool_router
 from .clause_split import MAX_CLAUSES
-from .const import CONF_MUSIC_PLAYER, CONF_WEIGHTS, DOMAIN
-from .executor import MUSIC_INTEGRATION
+from .const import (
+    CONF_MUSIC_PLAYER, CONF_WEIGHTS, DOMAIN, MUSIC_INTEGRATION,
+)
 from .needle_engine.agent import fetch
 
 

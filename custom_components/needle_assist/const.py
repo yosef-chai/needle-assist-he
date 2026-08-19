@@ -129,6 +129,52 @@ ARG_RENAME: Final[dict[str, str]] = {
 # Arguments that are targeting metadata, never service data.
 NON_SERVICE_ARGS: Final = {"area", "name"}
 
+# The integration whose media_player entities music_assistant.play_media can
+# target. Named once because it is both the registry test and the reason the
+# tool degrades gracefully in a house that does not have it.
+MUSIC_INTEGRATION: Final = "music_assistant"
+
+# Domains whose "name" argument identifies the entity itself rather than a
+# device inside an area: scene.evening, script.good_night, timer.pasta.
+NAME_ADDRESSED: Final = {
+    "scene_activate": "scene",
+    "script_run": "script",
+    "automation_turn_on": "automation",
+    "automation_turn_off": "automation",
+    "input_boolean_turn_on": "input_boolean",
+    "input_boolean_turn_off": "input_boolean",
+    "timer_start": "timer",
+    "timer_cancel": "timer",
+}
+
+# Home Assistant keeps a household's routines in three domains and offers no
+# way to tell from a Hebrew sentence which one a given routine landed in:
+# "אווירת ערב" is a scene in one house and a script in the next. Both models
+# this project has trained confuse the two - v10 answered 21 of its routine
+# failures with script_run where the gold was scene_activate, v9 answered 14
+# with automation_turn_on - and the registry knows the answer.
+#
+# So a routine named in the sentence but absent from the domain the model
+# chose is looked for in the sibling domain. Only then: a match in the
+# chosen domain always wins, so this can turn a failure into an action and
+# never an action into a different one.
+#
+# Automations are deliberately not in this table. `automation.turn_on`
+# *enables* an automation rather than running it, which is not the same act
+# as activating a scene, and guessing wrong there would leave a household
+# with an automation quietly switched on.
+ROUTINE_SIBLING: Final = {
+    "scene_activate": "script_run",
+    "script_run": "scene_activate",
+}
+
+# Tools where naming nothing means every one of them. "בטל את הטיימר" in a
+# house with one timer running is unambiguous, and with three it plainly
+# means all three. Nothing else belongs here: "תפעיל סצנה" with no scene
+# named is a sentence that failed to say which, and activating every scene
+# in the house is not a reading of it.
+ALL_WHEN_UNNAMED: Final = {"timer_start", "timer_cancel"}
+
 # Spoken confirmations. Hebrew, because the user is speaking Hebrew.
 SPEECH_OK: Final = "בוצע"
 SPEECH_NOTHING: Final = "לא הבנתי מה לעשות"
