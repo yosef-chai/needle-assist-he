@@ -129,6 +129,70 @@ ARG_RENAME: Final[dict[str, str]] = {
 # Arguments that are targeting metadata, never service data.
 NON_SERVICE_ARGS: Final = {"area", "name"}
 
+# Every argument each tool's schema declares, so a call carries nothing the
+# service will reject.
+#
+# This is needed because the sentence is allowed to change which tool runs -
+# `direction.settle` and the music upgrade both do it - and the model filled
+# its arguments for the tool it originally chose. "תעביר את המזגן למהירות
+# גבוה" came back as `climate_set_temperature{temperature: 23}`, the verb
+# corrected it to `climate_set_fan_mode`, and the stale `temperature` would
+# have made Home Assistant reject the whole call: `climate.set_fan_mode` does
+# not take one. The household would have been told the command failed, by the
+# guard that was there to make it work.
+#
+# Kept here rather than read out of tools.json because that file is
+# deliberately not read on the event loop (see `needle_runner`), and a test
+# asserts the two agree exactly.
+TOOL_ARGS: Final[dict[str, frozenset[str]]] = {
+    "automation_turn_off": frozenset(("name",)),
+    "automation_turn_on": frozenset(("name",)),
+    "camera_turn_off": frozenset(("area",)),
+    "camera_turn_on": frozenset(("area",)),
+    "climate_set_fan_mode": frozenset(("area", "fan_mode",)),
+    "climate_set_hvac_mode": frozenset(("area", "hvac_mode",)),
+    "climate_set_temperature": frozenset((
+        "area", "temperature", "temperature_step"
+    )),
+    "climate_turn_off": frozenset(("area",)),
+    "cover_close": frozenset(("area",)),
+    "cover_open": frozenset(("area",)),
+    "cover_set_position": frozenset(("area", "position",)),
+    "cover_stop": frozenset(("area",)),
+    "fan_oscillate": frozenset(("area", "oscillating",)),
+    "fan_turn_off": frozenset(("area",)),
+    "fan_turn_on": frozenset(("area", "percentage",)),
+    "get_state": frozenset(("area", "domain",)),
+    "get_weather": frozenset(("day_offset",)),
+    "input_boolean_turn_off": frozenset(("name",)),
+    "input_boolean_turn_on": frozenset(("name",)),
+    "light_toggle": frozenset(("area",)),
+    "light_turn_off": frozenset(("area",)),
+    "light_turn_on": frozenset((
+        "area", "brightness_pct", "brightness_step_pct", "color_name"
+    )),
+    "lock_lock": frozenset(("area",)),
+    "lock_unlock": frozenset(("area",)),
+    "media_mute": frozenset(("area", "is_volume_muted",)),
+    "media_next_track": frozenset(("area",)),
+    "media_pause": frozenset(("area",)),
+    "media_play": frozenset(("area",)),
+    "media_select_source": frozenset(("area", "source",)),
+    "media_set_volume": frozenset(("area", "volume_pct", "volume_step_pct",)),
+    "music_play": frozenset(("area", "media_type",)),
+    "notify_send": frozenset(("message",)),
+    "scene_activate": frozenset(("name",)),
+    "script_run": frozenset(("name",)),
+    "switch_turn_off": frozenset(("area", "name",)),
+    "switch_turn_on": frozenset(("area", "name",)),
+    "timer_cancel": frozenset(("name",)),
+    "timer_start": frozenset(("minutes", "name",)),
+    "vacuum_pause": frozenset(),
+    "vacuum_return_to_base": frozenset(),
+    "vacuum_set_fan_speed": frozenset(("fan_speed",)),
+    "vacuum_start": frozenset(("area",)),
+}
+
 # The integration whose media_player entities music_assistant.play_media can
 # target. Named once because it is both the registry test and the reason the
 # tool degrades gracefully in a house that does not have it.

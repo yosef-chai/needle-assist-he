@@ -57,7 +57,8 @@ from .const import (
     MUSIC_INTEGRATION,
     SETTING_SLOT,
     NAME_ADDRESSED,
-    NON_SERVICE_ARGS, QUERY_TOOLS, ROUTINE_SIBLING, SERVICE_MAP, TOOL_DOMAIN,
+    NON_SERVICE_ARGS, QUERY_TOOLS, ROUTINE_SIBLING, SERVICE_MAP,
+    TOOL_ARGS, TOOL_DOMAIN,
     WEATHER_STATES_HE,
 )
 
@@ -216,8 +217,10 @@ class CallExecutor:
     def _service_data(self, tool: str, args: dict, entity_ids: list[str],
                       utterance: str = "") -> dict:
         """Model arguments -> Home Assistant service data."""
+        allowed = TOOL_ARGS.get(tool, frozenset())
         data: dict[str, Any] = {
-            k: v for k, v in args.items() if k not in NON_SERVICE_ARGS
+            k: v for k, v in args.items()
+            if k not in NON_SERVICE_ARGS and k in allowed
         }
 
         # Slots the sentence names outright. These come first and stand apart

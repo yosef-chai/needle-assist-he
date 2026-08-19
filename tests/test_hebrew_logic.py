@@ -919,3 +919,20 @@ def test_a_colour_is_corrected_but_never_invented():
 ])
 def test_the_sentence_names_the_colour(sentence, colour):
     assert SLOT.setting_from(sentence, "color_name") == colour
+
+
+def test_the_service_data_carries_only_arguments_the_tool_declares():
+    """The sentence is allowed to change which tool runs - `direction.settle`
+    and the music upgrade both do it - and the model filled its arguments for
+    the tool it originally chose. "תעביר את המזגן למהירות גבוה" came back as
+    `climate_set_temperature{temperature: 23}`, the verb corrected it to
+    `climate_set_fan_mode`, and the stale `temperature` would have made Home
+    Assistant reject the call. Found on the device."""
+    import json
+    catalogue = {t["name"]: t for t in json.loads(
+        (pathlib.Path(__file__).resolve().parents[1] / "custom_components"
+         / "needle_assist" / "tools.json").read_text(encoding="utf-8"))}
+    assert set(CONST.TOOL_ARGS) == set(catalogue)
+    for name, tool in catalogue.items():
+        assert CONST.TOOL_ARGS[name] == frozenset(
+            tool["parameters"]["properties"]), name
