@@ -288,6 +288,18 @@ class MusicRequest:
     artist: str | None = None
 
 
+#: A number after the title is a level, not part of the name: "שים את השיר על
+#: שישים" sets the volume. Used to keep :func:`names_a_level` from calling that
+#: sentence a play - see `executor.execute`.
+_LEVEL: Final = re.compile(
+    r"(\d|אחוז|עשרים|שלושים|ארבעים|חמישים|שישים|שבעים|שמונים|תשעים|מאה)")
+
+
+def names_a_level(utterance: str) -> bool:
+    """True when the sentence names a number, which a title does not."""
+    return bool(_LEVEL.search(utterance))
+
+
 def extract_music(utterance: str) -> MusicRequest | None:
     """Parse "play me X by Y" into a Music Assistant search.
 

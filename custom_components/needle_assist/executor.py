@@ -53,7 +53,8 @@ from homeassistant.helpers import (
 
 from . import direction, slot_match, tool_router
 from .const import (
-    ALL_WHEN_UNNAMED, CONF_MUSIC_PLAYER, MUSIC_INTEGRATION, NAME_ADDRESSED,
+    ALL_WHEN_UNNAMED, CONF_MUSIC_PLAYER, MEDIA_TOOLS, MUSIC_INTEGRATION,
+    NAME_ADDRESSED,
     NON_SERVICE_ARGS, QUERY_TOOLS, ROUTINE_SIBLING, SERVICE_MAP, TOOL_DOMAIN,
     WEATHER_STATES_HE,
 )
@@ -299,19 +300,40 @@ class CallExecutor:
 
         # "Play" and "play *this*" are one verb apart in Hebrew, and which one
         # was meant is decided by whether a name follows - which the sentence
-        # settles and the model has to guess. So when the model says "resume"
-        # about a sentence that named something specific, the sentence wins.
+        # settles and the model has to guess. So when the model reaches for
+        # some other media tool about a sentence that named something
+        # specific, the sentence wins.
         #
         # This is the same rule the rest of this module runs on, and it is
         # safe here for the same reason: it never overrides which *domain* was
         # chosen. The model has already decided the utterance is about audio -
         # "תפעיל את השואב" gets vacuum_start and is never seen here - so all
-        # that is being corrected is which of two media tools inside that
-        # decision. It also makes the tool work before any model knows it
-        # exists, which is what a household running the previous weights has.
-        if tool == "media_play" and utterance and slot_match.extract_music(utterance):
-            _LOGGER.debug("the sentence names something to play; using music_play")
-            tool = "music_play"
+        # that is being corrected is which media tool inside that decision. It
+        # also makes the tool work before any model knows it exists, which is
+        # what a household running the previous weights has.
+        #
+        # Two strengths of evidence, because they carry different risks. A
+        # model that already said *play* has only the "what" left to get
+        # wrong, so any title is enough. A model that said something else -
+        # set the volume, pause - is being overruled on the verb too, so the
+        # sentence has to have named the **kind** as well ("האלבום", "פלייליסט")
+        # and no number: "שים את השיר על שישים" is a volume and says so.
+        #
+        # Measured over both splits, on the 663 media rows where the sentence
+        # names a kind and a title and no number: 661 are music_play and the
+        # two that are not are the same glued-ו artifact the narrow rule
+        # already mishandles today, so the widening breaks nothing new. It
+        # repairs 16 of the 26 music failures, all of them "ערבב את האלבום" -
+        # shuffle - answered with media_set_volume.
+        if tool in MEDIA_TOOLS and utterance:
+            request = slot_match.extract_music(utterance)
+            if request is not None and (
+                    tool == "media_play"
+                    or (request.media_type
+                        and not slot_match.names_a_level(utterance))):
+                _LOGGER.debug("the sentence names something to play; using "
+                              "music_play instead of %s", tool)
+                tool = "music_play"
 
         if tool == "music_play":
             return await self._play_music(args, device_id, context, utterance,

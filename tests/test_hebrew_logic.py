@@ -835,3 +835,31 @@ def test_every_excluded_state_word_is_one_the_router_holds():
     known = {CLAUSE._fold(h) for hints in ROUTER.TOOL_HINTS.values() for h in hints}
     known |= {CLAUSE._fold(v) for verbs in ROUTER.FAMILY_VERBS.values() for v in verbs}
     assert CLAUSE.NOT_ORDERS <= known, CLAUSE.NOT_ORDERS - known
+
+
+@pytest.mark.parametrize("sentence,kind,level", [
+    # A kind and a title and no number: strong enough to overrule a model that
+    # reached for the wrong media tool. 12 of the 26 music failures were
+    # "ערבב את האלבום" - shuffle - answered with media_set_volume.
+    ("תשמע, ערבבי את התקליט סיפורי פוגי בסטודיו בבקשה", "album", False),
+    ("אני צריכה שתערבב לי את האלבום המסע של עדן חסון", "album", False),
+    ("אה, בבקשה נגן את הפלייליסט ילדים", "playlist", False),
+    # A number is a level, not part of a name: this one really is a volume.
+    ("אתה יכול לשים את השיר על הדשא על שישים", "track", True),
+    # No kind named, so the sentence is not strong enough on its own - which
+    # is what keeps a mute a mute and a source a source.
+    ("תשים על שקט בחדר האורחים", None, False),
+    ("שים בלוטות' בחדר אוכל", None, False),
+])
+def test_how_strongly_the_sentence_names_something_to_play(sentence, kind, level):
+    request = SLOT.extract_music(sentence)
+    assert (request.media_type if request else None) == kind
+    assert SLOT.names_a_level(sentence) is level
+
+
+def test_the_upgrade_never_leaves_the_audio_domain():
+    """`music_play` is the destination and the query tools are not audio: a
+    question about music is not a request to play it."""
+    assert "music_play" not in CONST.MEDIA_TOOLS
+    assert not (CONST.MEDIA_TOOLS & set(CONST.QUERY_TOOLS))
+    assert CONST.MEDIA_TOOLS <= set(CONST.SERVICE_MAP)

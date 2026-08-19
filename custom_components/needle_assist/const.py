@@ -134,6 +134,14 @@ NON_SERVICE_ARGS: Final = {"area", "name"}
 # tool degrades gracefully in a house that does not have it.
 MUSIC_INTEGRATION: Final = "music_assistant"
 
+# The audio tools a named title can be promoted out of. `music_play` is absent
+# because it is the destination, and the query tools because a question about
+# music is not a request to play it.
+MEDIA_TOOLS: Final = frozenset((
+    "media_play", "media_pause", "media_set_volume", "media_mute",
+    "media_next_track", "media_select_source",
+))
+
 # Domains whose "name" argument identifies the entity itself rather than a
 # device inside an area: scene.evening, script.good_night, timer.pasta.
 NAME_ADDRESSED: Final = {
