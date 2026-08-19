@@ -207,8 +207,16 @@ FAMILY_VERBS: Final[dict[str, list[str]]] = {
 # to make the family strong - and, measured, not enough to pass the refusal
 # gate either: the four off-topic rows that say "תספר לי משהו על הפירמידות"
 # stay refused, which they do not if the word is entered as a noun.
+#
+# ``שקט`` is here for the mirror-image reason. It is a media noun, because
+# "תעשה שקט" is a mute, and it is also the vacuum's quietest suction setting -
+# so "שים את הרובוט על שקט" scored media 3 against vacuum 3 and lost the tie on
+# table order, handing the sentence four media tools and one vacuum tool. As a
+# weak term it breaks the tie the right way (vacuum 4, media 3) without ever
+# carrying a sentence on its own: "תעשה שקט" is still media 3 against vacuum 1.
 FAMILY_WEAK: Final[dict[str, list[str]]] = {
     "media": ["משהו"],
+    "vacuum": ["שקט"],
 }
 
 # Sub-ranking inside a family. This is what decides *which* of a family's tools
