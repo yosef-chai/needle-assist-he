@@ -90,12 +90,29 @@ _JOINERS: Final[tuple[tuple[str, ...], ...]] = tuple(
 )
 
 
+#: Words that route a command without being one. They earn their place in the
+#: router - "חם" really is evidence that a sentence is about the air
+#: conditioner - and they are states, not orders, so a half-sentence holding
+#: nothing else is context rather than a second command.
+#:
+#: Found on the device. "בסלון חם מדי, תנמיך משמעותית" is how the corpus - and
+#: a person - says *lower the temperature*, and it was being cut at the comma
+#: into "בסלון חם מדי" and "תנמיך משמעותית", because both halves looked like
+#: they held a verb. The first half then set a temperature in the wrong room
+#: and the second opened a blind.
+NOT_ORDERS: Final[frozenset[str]] = frozenset(
+    _fold(w) for w in ("חם", "קר", "חמה", "קרה", "חם מדי", "קר מדי",
+                       "חשוך", "מחניק", "רועש")
+)
+
+
 def _action_verbs() -> frozenset[str]:
     """Every verb that names an action, folded.
 
     ``query`` is excluded on purpose: "מה" and "האם" open a question, and a
     question is answered as one unit even when it mentions two rooms. Read-only
-    tools are excluded from the hints for the same reason.
+    tools are excluded from the hints for the same reason, and :data:`NOT_ORDERS`
+    for a third: a room being hot is not an instruction to do anything.
     """
     words: set[str] = set()
     for family, verbs in FAMILY_VERBS.items():
@@ -106,7 +123,7 @@ def _action_verbs() -> frozenset[str]:
         if tool.startswith("get_"):
             continue
         words.update(_fold(h) for h in hints)
-    return frozenset(words)
+    return frozenset(words) - NOT_ORDERS
 
 
 ACTION_VERBS: Final[frozenset[str]] = _action_verbs()

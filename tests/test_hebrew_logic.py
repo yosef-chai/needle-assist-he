@@ -802,3 +802,28 @@ def test_the_polite_infinitive_is_still_an_order(sentence, settled):
     opposite = DIRECTION.OPPOSITE[settled]
     assert DIRECTION.settle(opposite, sentence) == settled
     assert DIRECTION.settle(settled, sentence) == settled
+
+
+@pytest.mark.parametrize("sentence,clauses", [
+    # A room being hot is not an instruction. Found on the device: this was
+    # cut at the comma into "בסלון חם מדי" and "תנמיך משמעותית", because
+    # `חם` is a climate hint and so looked like a verb. The first half then
+    # set a temperature in the wrong room and the second opened a blind.
+    ("בסלון חם מדי, תנמיך משמעותית", ["בסלון חם מדי, תנמיך משמעותית"]),
+    ("במרפסת קר מדי, תגביר קצת", ["במרפסת קר מדי, תגביר קצת"]),
+    # 17 rows of the held-out set, and none of them stops being one order.
+    ("בחדר האוכל חם מדי, תוריד בהרבה", ["בחדר האוכל חם מדי, תוריד בהרבה"]),
+    # Two real orders separated by a comma are still two.
+    ("תכבה את האור בסלון, סגור את התריס במטבח",
+     ["תכבה את האור בסלון", "סגור את התריס במטבח"]),
+])
+def test_a_room_being_hot_is_not_an_order(sentence, clauses):
+    assert CLAUSE.split_clauses(sentence) == clauses
+
+
+def test_the_state_words_stay_in_the_router():
+    """They are excluded from the *verbs*, not from routing - "חם" really is
+    evidence that a sentence is about the air conditioner, and dropping it
+    there would send "בסלון חם מדי, תנמיך" to no family at all."""
+    assert CLAUSE.NOT_ORDERS & CLAUSE.ACTION_VERBS == frozenset()
+    assert ROUTER.score_families("בסלון חם מדי, תנמיך משמעותית")[0][0] == "climate"
