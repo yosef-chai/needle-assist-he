@@ -25,12 +25,13 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          # HACS looks this domain up in the home-assistant/brands repository,
-          # which is a pull request against that repository and cannot be made
-          # from here. The images themselves ship in
-          # custom_components/needle_assist/brand/, which is where Home
-          # Assistant serves a custom integration's icon from.
-          ignore: brands
+          # No `ignore:` here on purpose. HACS's brand check is satisfied by a
+          # brand/ directory containing icon.png inside the integration, which
+          # is what ships - it only falls back to looking the domain up in
+          # home-assistant/brands when that directory is absent. An ignore of
+          # any kind also disqualifies the repository from the default HACS
+          # list, so if this check ever does fail it has to be fixed, not
+          # silenced.
 
   lint:
     name: ruff
