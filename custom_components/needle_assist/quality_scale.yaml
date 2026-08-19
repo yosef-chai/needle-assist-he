@@ -9,7 +9,7 @@
 #
 #   ruff check custom_components/needle_assist          - clean
 #   mypy custom_components/needle_assist                - clean, --strict
-#   pytest tests --cov                                  - 231 passed, 95%
+#   pytest tests --cov                                  - 237 passed, 95%
 #   pytest tests/ha/test_config_flow.py --cov=...config_flow  - 100%
 #
 # One thing the scale has no rule for, recorded because it is asked about:
@@ -126,7 +126,7 @@ rules:
       service, and holds no credential.
   test-coverage:
     status: done
-    comment: 95% over the integration, 231 tests. The vendored engine is
+    comment: 95% over the integration, 237 tests. The vendored engine is
       excluded, as an upstream dependency with its own tests.
 
   # ------------------------------------------------------------------ Gold
@@ -148,12 +148,27 @@ rules:
     status: exempt
     comment: There is nothing on the network to find. The integration is a
       model file and a native library on the Home Assistant machine itself.
-  docs-data-update: done
-  docs-examples: done
-  docs-known-limitations: done
+  docs-data-update:
+    status: todo
+    comment: Nothing is polled - the house is read from the registries at the
+      moment the agent is spoken to - but the README no longer says so. It is
+      kept short on purpose, for the household rather than for a developer.
+  docs-examples:
+    status: todo
+    comment: The `conversation.process` examples were removed with the rest of
+      the developer-facing prose. The same short README is the reason.
+  docs-known-limitations:
+    status: todo
+    comment: Partly - the README names the weakest family, the relative
+      temperature step, and says which services cannot be reached at all. The
+      full list, four-order cap and clause-splitting caveat included, is not
+      there any more.
   docs-supported-devices: done
   docs-supported-functions: done
-  docs-troubleshooting: done
+  docs-troubleshooting:
+    status: todo
+    comment: The diagnostics download answers every question the table used to
+      answer, but the README no longer points at it.
   docs-use-cases: done
   dynamic-devices:
     status: exempt
