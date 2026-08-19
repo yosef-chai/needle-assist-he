@@ -714,3 +714,71 @@ def test_volume_against_play_is_left_out_on_purpose():
     held-out set, not that it is usually right.
     """
     assert "media_set_volume" not in DIRECTION.OPPOSITE
+
+
+@pytest.mark.parametrize("sentence,way", [
+    # The verb decides.
+    ("בסלון הגדול חם מדי, תנמיך משמעותית", -1),
+    ("במרפסת קר מדי, תגביר קצת", 1),
+    ("תעמעם את האור בסלון", -1),
+    ("תרים את העוצמה במטבח", 1),
+    # No verb, so the adjective decides - and "יותר חלש" is more *quiet*,
+    # not more. Reading the comparative first gets all 32 of these backwards.
+    ("יותר חלש בחוץ", -1),
+    ("משמעותית יותר חלש בפינת המטבח", -1),
+    ("קצת יותר חזק בסלון", 1),
+    # Neither, so the bare comparative decides. 170 brightness rows of the
+    # corpus say only this much.
+    ("קצת יותר בסלון", 1),
+    ("טיפה פחות במטבח", -1),
+    # And silence is allowed.
+    ("תעשה משהו בסלון", None),
+])
+def test_the_sentence_says_which_way(sentence, way):
+    assert DIRECTION.which_way(sentence) == way
+
+
+def test_a_retraction_is_not_a_direction():
+    """The verb before "לא לא" is the one the speaker withdrew."""
+    assert DIRECTION.which_way("תנמיך, לא לא, תגביר") is None
+
+
+@pytest.mark.parametrize("sentence,before,after", [
+    # An eight-degree error from a one-character one.
+    ("בסלון הגדול חם מדי, תנמיך משמעותית",
+     {"area": "living_room", "temperature_step": 4},
+     {"area": "living_room", "temperature_step": -4}),
+    ("יותר חלש בחוץ",
+     {"area": "garden", "volume_step_pct": 20},
+     {"area": "garden", "volume_step_pct": -20}),
+    ("תגביר קצת יותר את האור",
+     {"area": "salon", "brightness_step_pct": -10},
+     {"area": "salon", "brightness_step_pct": 10}),
+    # Already right: left alone, magnitude and all.
+    ("תנמיך קצת", {"area": "salon", "temperature_step": -1},
+     {"area": "salon", "temperature_step": -1}),
+    # Nothing is invented: an absolute temperature is not a step, an argument
+    # the model did not emit stays absent, and a silent sentence changes
+    # nothing.
+    ("תנמיך", {"area": "salon", "temperature": 24},
+     {"area": "salon", "temperature": 24}),
+    ("תכבה את האור", {"area": "salon"}, {"area": "salon"}),
+    ("תעשה משהו", {"area": "salon", "temperature_step": 3},
+     {"area": "salon", "temperature_step": 3}),
+])
+def test_the_sentence_settles_the_sign_and_nothing_else(sentence, before, after):
+    assert DIRECTION.settle_steps(before, sentence) == after
+
+
+def test_settling_a_sign_does_not_touch_the_caller_s_arguments():
+    args = {"area": "salon", "temperature_step": 4}
+    DIRECTION.settle_steps(args, "חם מדי, תנמיך")
+    assert args == {"area": "salon", "temperature_step": 4}
+
+
+def test_every_relative_argument_is_guarded():
+    """The set must match what `executor._service_data` resolves against a
+    current reading; a fourth one added there without being added here would
+    ship with an unguarded sign."""
+    assert DIRECTION.RELATIVE == {
+        "temperature_step", "brightness_step_pct", "volume_step_pct"}

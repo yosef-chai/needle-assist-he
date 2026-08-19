@@ -1,4 +1,4 @@
-"""Which of two tools: lock or unlock, start it or set it.
+"""Which of two tools, and which way a number points.
 
 Every model this project has trained inverts the direction of a command
 sometimes. Counted over the dumped failures of two runs on the same held-out
@@ -38,6 +38,55 @@ domain - answered by the same evidence:
 ``media_set_volume`` against ``media_play`` was measured too and is left out:
 65 agree and **one** disagrees, and one is not zero. The bar for overruling a
 model is that the rule is never wrong, not that it is usually right.
+
+Which way the number points
+---------------------------
+
+Three arguments are *relative* - ``temperature_step``, ``brightness_step_pct``
+and ``volume_step_pct`` - and :mod:`executor` adds them to the device's current
+reading before it calls the service. Their sign is a direction, so getting it
+backwards is the same defect one level down:
+
+    query  בסלון הגדול חם מדי, תנמיך משמעותית    it is too hot, lower it a lot
+    pred   climate_set_temperature{temperature_step: 4}   ...raised it 4 degrees
+
+That is an eight-degree error from a one-character one, and the model makes it
+often: the training corpus is 71% positive steps and the held-out set is 97%
+negative, so a model that learned "usually up" scores well on one and badly on
+the other. Wrong-sign predictions are the largest single group of failures in
+the whole evaluation.
+
+The sentence is not ambiguous, and it reads in three tiers, because Hebrew
+comparatives stack:
+
+1. **The verb.** ``תנמיך``, ``תוריד``, ``תקרר``, ``תחליש``, ``תעמעם`` go down;
+   ``תגביר``, ``תעלה``, ``תרים``, ``תחזק``, ``תחמם`` go up.
+2. **The adjective**, when there is no verb. ``חלש`` is quiet and ``חזק`` is
+   loud, ``עמום`` is dim and ``בהיר`` is bright.
+3. **The bare comparative**, when there is neither. ``פחות`` down, ``יותר`` up.
+
+The order is what makes it work. "יותר חלש בחוץ" is *more quiet*, not *more*:
+``יותר`` intensifies the adjective instead of pointing anywhere, and reading
+the tiers in the other order gets all 32 of these backwards. Measured against
+gold over both splits, on every call carrying one of the three arguments:
+
+    the words agree with gold     1222     98.9%
+    the words disagree with gold     1      0.08%
+    the words say nothing           12      1.0%
+
+The one disagreement is "יותר כלש בחדר הביטחון" - the corpus injects speech
+noise, and here it corrupted the direction word itself. That is a different
+thing from the ``media_play`` case above, which is why this one ships and that
+one does not: ``נגן`` is a rule that is *wrong about Hebrew*, and this is a
+rule that is right about Hebrew and defeated by a typo the model cannot read
+either.
+
+Only the sign is taken. The magnitude was measured too - ``קצת``/``שמץ`` is
+one step, ``חזק`` three, ``משמעותית``/``הרבה`` four - and reaches 96.6% with
+six disagreements, every one of them another injected typo. Six is not zero,
+being two degrees out is not being eight degrees out in the wrong direction,
+and a step that is too small is one the speaker simply repeats. So the model
+keeps the number and the sentence keeps the sign.
 
 Three things had to be excluded to get there, and each one was found by the
 measurement rather than by reading:
@@ -81,6 +130,25 @@ PAIRS: Final[tuple[tuple[str, str], ...]] = (
     ("climate_set_fan_mode", "climate_set_temperature"),
 )
 
+#: Arguments that are a change rather than a value, so their sign is a
+#: direction. :mod:`executor` adds these to the device's current reading.
+RELATIVE: Final[frozenset[str]] = frozenset(
+    ("temperature_step", "brightness_step_pct", "volume_step_pct")
+)
+
+#: Direction words, strongest evidence first; see the module docstring for why
+#: the order matters. Each tier is (up, down).
+TIERS: Final[tuple[tuple[tuple[str, ...], tuple[str, ...]], ...]] = (
+    (("תגביר", "תגבירי", "להגביר", "תעלה", "תעלי", "להעלות", "תרים", "תרימי",
+      "להרים", "תחזק", "תחזקי", "לחזק", "תחמם", "תחממי", "לחמם"),
+     ("תנמיך", "תנמיכי", "להנמיך", "תוריד", "תורידי", "להוריד", "תחליש",
+      "תחלישי", "להחליש", "תקרר", "תקררי", "לקרר", "תעמעם", "תעמעמי",
+      "לעמעם")),
+    (("חזק", "חזקה", "בהיר", "בהירה"),
+     ("חלש", "חלשה", "עמום", "עמומה", "כהה")),
+    (("יותר",), ("פחות",)),
+)
+
 OPPOSITE: Final[dict[str, str]] = {}
 for _a, _b in PAIRS:
     OPPOSITE[_a] = _b
@@ -113,3 +181,42 @@ def settle(tool: str, text: str) -> str:
     mine = _hits(VOCABULARY[tool], tokens, text)
     theirs = _hits(VOCABULARY[other], tokens, text)
     return other if theirs > mine else tool
+
+
+def which_way(text: str) -> int | None:
+    """``1`` for up, ``-1`` for down, ``None`` when the sentence is silent.
+
+    The tiers are read in order and the first one that speaks decides, which
+    is what keeps "יותר חלש" quiet rather than loud.
+    """
+    if not text or CORRECTION.search(_fold(text)):
+        return None
+    tokens = _tokens(text)
+    for up_words, down_words in TIERS:
+        up = _hits(list(up_words), tokens, text)
+        down = _hits(list(down_words), tokens, text)
+        if up != down:
+            return 1 if up > down else -1
+    return None
+
+
+def settle_steps(arguments: dict, text: str) -> dict:
+    """``arguments`` with the sign of any relative argument corrected.
+
+    Nothing is added, nothing is removed and no magnitude changes: an argument
+    the model did not emit stays absent, because the sentence was measured to
+    settle which way a step points and not whether there is one.
+    """
+    relative = {k: v for k, v in arguments.items()
+                if k in RELATIVE and isinstance(v, (int, float))
+                and not isinstance(v, bool) and v}
+    if not relative:
+        return arguments
+    way = which_way(text)
+    if way is None:
+        return arguments
+    fixed = dict(arguments)
+    for key, value in relative.items():
+        if (value > 0) != (way > 0):
+            fixed[key] = -value
+    return fixed

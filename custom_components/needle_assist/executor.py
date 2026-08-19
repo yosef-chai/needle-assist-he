@@ -279,12 +279,19 @@ class CallExecutor:
 
         # Lock or unlock, open or close, on or off. The Hebrew verb settles
         # it and the model does not always agree with the verb - see
-        # `direction`, where the signal is measured at 802 right and 0 wrong
+        # `direction`, where the signal is measured at 1091 right and 0 wrong
         # against gold. Corrected before anything else, because everything
         # below reads `tool`.
         if utterance and (settled := direction.settle(tool, utterance)) != tool:
             _LOGGER.debug("the sentence says %s, not %s", settled, tool)
             tool = settled
+
+        # The same verb also settles which way a relative argument points, and
+        # `_service_data` below adds those to the device's current reading - so
+        # a wrong sign moves the thermostat away from what was asked instead of
+        # towards it. 1222 right and 1 wrong; see `direction`.
+        if utterance:
+            args = direction.settle_steps(args, utterance)
 
         if tool in QUERY_TOOLS:
             return await self._answer_query(tool, args, device_id, utterance,
