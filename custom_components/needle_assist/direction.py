@@ -1,4 +1,4 @@
-"""Which way round: lock or unlock, open or close, on or off.
+"""Which of two tools: lock or unlock, start it or set it.
 
 Every model this project has trained inverts the direction of a command
 sometimes. Counted over the dumped failures of two runs on the same held-out
@@ -14,15 +14,30 @@ model's answer is corrected when the two disagree - the same rule, and the same
 safety argument, as the ``media_play`` upgrade in :mod:`executor`: it never
 changes which *domain* the model chose, only which of two tools inside it.
 
-Measured against gold over all 2,379 held-out rows, on the 1,179 calls whose
+Measured against gold over all 2,379 held-out rows, on the 1,542 calls whose
 tool belongs to one of the guarded pairs:
 
-    the words agree with gold      802     68.0%
+    the words agree with gold     1091     70.8%
     the words disagree with gold     0      0.00%
-    the words say nothing          377     32.0%
+    the words say nothing          451     29.2%
 
 Zero. A signal that is never wrong when it speaks is a signal that can overrule
 a model which is wrong one time in eight.
+
+The same mechanism settles two pairs that are not directions at all, and they
+are here because they are the same question - which of two tools inside one
+domain - answered by the same evidence:
+
+* **A setting is not a start.** "שים את הרובוט על שקט" sets the vacuum's
+  suction; the model answered 17 of these with ``vacuum_start``. 82 agree,
+  0 disagree.
+* **A fan speed is not a temperature.** "תעביר את המזגן למהירות נמוכה" is
+  ``climate_set_fan_mode``; the model answered 15 of these with
+  ``climate_set_temperature``. 174 agree, 0 disagree.
+
+``media_set_volume`` against ``media_play`` was measured too and is left out:
+65 agree and **one** disagrees, and one is not zero. The bar for overruling a
+model is that the rule is never wrong, not that it is usually right.
 
 Three things had to be excluded to get there, and each one was found by the
 measurement rather than by reading:
@@ -50,8 +65,8 @@ from typing import Final
 from .clause_split import CORRECTION
 from .tool_router import TOOL_HINTS, _fold, _hits, _tokens
 
-#: Tools that come in a pair whose direction a Hebrew verb settles. ``media``
-#: is deliberately absent; see the module docstring.
+#: Tools that come in a pair the Hebrew words settle. Play against pause and
+#: volume against play are deliberately absent; see the module docstring.
 PAIRS: Final[tuple[tuple[str, str], ...]] = (
     ("lock_lock", "lock_unlock"),
     ("light_turn_on", "light_turn_off"),
@@ -61,6 +76,9 @@ PAIRS: Final[tuple[tuple[str, str], ...]] = (
     ("camera_turn_on", "camera_turn_off"),
     ("automation_turn_on", "automation_turn_off"),
     ("input_boolean_turn_on", "input_boolean_turn_off"),
+    # Not a direction, the same question: which of two tools in one domain.
+    ("vacuum_set_fan_speed", "vacuum_start"),
+    ("climate_set_fan_mode", "climate_set_temperature"),
 )
 
 OPPOSITE: Final[dict[str, str]] = {}

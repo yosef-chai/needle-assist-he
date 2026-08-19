@@ -691,3 +691,26 @@ def test_the_correction_pattern_is_shared_with_the_direction_guard():
     the speaker withdrew.
     """
     assert DIRECTION.CORRECTION is CLAUSE.CORRECTION
+
+
+@pytest.mark.parametrize("said,sentence,settled", [
+    # Not a direction, the same question: which of two tools in one domain.
+    ("vacuum_start", "שים את הרובוט על שקט", "vacuum_set_fan_speed"),
+    ("climate_set_temperature", "תעביר את המזגן למהירות נמוכה",
+     "climate_set_fan_mode"),
+    # ...and the other way round, so the rule is not a one-way ratchet.
+    ("vacuum_set_fan_speed", "תפעיל את שואב האבק", "vacuum_start"),
+    ("climate_set_fan_mode", "תוריד את המזגן ל-22 מעלות",
+     "climate_set_temperature"),
+])
+def test_a_setting_is_not_a_start(said, sentence, settled):
+    assert DIRECTION.settle(said, sentence) == settled
+
+
+def test_volume_against_play_is_left_out_on_purpose():
+    """65 agree and one disagrees, and one is not zero.
+
+    The bar for overruling a model is that the rule is never wrong on the
+    held-out set, not that it is usually right.
+    """
+    assert "media_set_volume" not in DIRECTION.OPPOSITE
