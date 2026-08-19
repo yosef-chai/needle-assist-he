@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Needle Assist (Hebrew)",
-        "description": "A fully local Hebrew voice assistant. Nothing runs in the cloud and nothing leaves the house.\n\nThe tuned Hebrew model ships with the integration, so you can submit this form empty. Only fill the field in if you want to run your own fine-tuned .cact file instead.",
+        "description": "A fully local Hebrew voice assistant. Nothing runs in the cloud and nothing leaves the house.",
         "data": {
           "weights_path": "Path to your own .cact file (optional)"
         },
@@ -36,7 +36,7 @@
     "step": {
       "init": {
         "title": "Needle Assist options",
-        "description": "Two settings, and only two. Everything else has one measured-correct value and is set for you.",
+        "description": "Customizable parameters",
         "data": {
           "music_player": "Speaker for music (optional)",
           "max_new_tokens": "Maximum tokens to generate per utterance"
