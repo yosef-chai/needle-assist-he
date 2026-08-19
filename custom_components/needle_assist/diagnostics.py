@@ -13,7 +13,12 @@ until the registries were read the way the integration reads them:
   to the user as "the model is broken".
 
 All three are answered by the ``areas`` and ``entities_without_an_area`` keys
-below. Nothing here leaves the machine unless the user chooses to share it.
+below. The ``music`` key answers the fourth question this integration gets
+asked - why a request to play something resumed playback instead - which has
+exactly one common cause: no Music Assistant player, so there is no library
+to search and nothing to search it with.
+
+Nothing here leaves the machine unless the user chooses to share it.
 """
 
 from __future__ import annotations
@@ -22,9 +27,12 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
 from . import slot_match, tool_router
-from .const import CONF_WEIGHTS, DOMAIN
+from .clause_split import MAX_CLAUSES
+from .const import CONF_MUSIC_PLAYER, CONF_WEIGHTS, DOMAIN
+from .executor import MUSIC_INTEGRATION
 from .needle_engine.agent import fetch
 
 
@@ -39,6 +47,15 @@ async def async_get_config_entry_diagnostics(
     # in it - the same thing every core diagnostics platform does.
     house = slot_match.SlotIndex(hass).describe()
 
+    registry = er.async_get(hass)
+    players = sorted(
+        item.entity_id
+        for item in registry.entities.values()
+        if item.domain == "media_player"
+        and item.platform == MUSIC_INTEGRATION
+        and not item.disabled_by
+    )
+
     return {
         "engine": {
             "version": fetch.ENGINE_VERSION,
@@ -47,10 +64,20 @@ async def async_get_config_entry_diagnostics(
             "tools_in_catalogue": len(getattr(runner, "_tools", []) or []),
         },
         "house": house,
-        # The two deterministic gates, so a "why did it refuse that" question
-        # can be answered without a debug log.
+        # Playing something by name needs a Music Assistant player. With none
+        # found, a request to play resumes playback on the room's speaker
+        # instead - which is the right answer, and not the one that was asked
+        # for, so it is worth being able to see why.
+        "music": {
+            "players": players,
+            "configured_default": entry.options.get(CONF_MUSIC_PLAYER),
+        },
+        # The deterministic gates, so a "why did it refuse that" question can
+        # be answered without a debug log.
         "gates": {
             "off_topic_threshold": tool_router.REFUSE_BELOW,
+            "room_weight": tool_router.ROOM_WEIGHT,
+            "max_clauses": MAX_CLAUSES,
             "families": sorted(tool_router.FAMILY_TOOLS),
         },
     }
