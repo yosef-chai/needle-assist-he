@@ -22,6 +22,13 @@ CONF_CONFIDENCE: Final = "min_confidence"
 CONF_MAX_TOKENS: Final = "max_new_tokens"
 CONF_REFUSE_GATE: Final = "refuse_off_topic"
 
+# Which speaker plays music when the sentence names no room. Optional, and
+# only meaningful with Music Assistant installed. A house with exactly one
+# Music Assistant player does not need it - that player is the only answer -
+# so the option earns its place only where there are several and one of them
+# is "the" speaker.
+CONF_MUSIC_PLAYER: Final = "music_player"
+
 DEFAULT_MAX_TOKENS: Final = 192
 
 # The deterministic off-topic gate is ON by default, unlike confidence gating.
@@ -78,6 +85,11 @@ SERVICE_MAP: Final[dict[str, tuple[str, str]]] = {
     "media_set_volume": ("media_player", "volume_set"),
     "media_mute": ("media_player", "volume_mute"),
     "media_select_source": ("media_player", "select_source"),
+    # A core Home Assistant integration's own service, not media_player's.
+    # media_player.play_media wants a content id - a URI - which nobody says
+    # out loud; this one takes a search string and resolves it against the
+    # library Music Assistant already indexes.
+    "music_play": ("music_assistant", "play_media"),
     "switch_turn_on": ("switch", "turn_on"),
     "switch_turn_off": ("switch", "turn_off"),
     "scene_activate": ("scene", "turn_on"),
@@ -97,6 +109,13 @@ QUERY_TOOLS: Final = {"get_state", "get_weather"}
 # The domain each tool targets, for entity matching.
 TOOL_DOMAIN: Final[dict[str, str]] = {
     name: dom for name, (dom, _) in SERVICE_MAP.items()
+} | {
+    # The one tool whose service domain is not its target domain: the service
+    # belongs to the music_assistant integration, the entity it acts on is an
+    # ordinary media_player. Deriving this from SERVICE_MAP alone would send
+    # entity matching looking for a "music_assistant" domain that has no
+    # entities in it.
+    "music_play": "media_player",
 }
 
 # Model argument -> service data key, where they differ.

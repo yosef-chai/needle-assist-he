@@ -406,6 +406,29 @@
     }
   },
   {
+    "name": "music_play",
+    "description": "Play a named song, album, artist, playlist or radio station",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "type": "string"
+        },
+        "media_type": {
+          "type": "string",
+          "enum": [
+            "track",
+            "album",
+            "artist",
+            "playlist",
+            "radio"
+          ]
+        }
+      },
+      "required": []
+    }
+  },
+  {
     "name": "media_set_volume",
     "description": "Set speaker volume percent",
     "parameters": {

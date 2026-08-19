@@ -27,11 +27,13 @@
         "title": "Needle Assist options",
         "description": "Every default here is the value that measured best. Change them only if you know why.",
         "data": {
+          "music_player": "Speaker for music (optional)",
           "refuse_off_topic": "Refuse utterances that are not about the house",
           "max_new_tokens": "Maximum tokens to generate per utterance",
           "min_confidence": "Minimum confidence to act (0 disables gating)"
         },
         "data_description": {
+          "music_player": "Which Music Assistant speaker plays when the request names no room. Leave empty if you have one player, or if you always say where you want the music.",
           "refuse_off_topic": "On by default. The model itself never refuses anything — measured at 0.0% correct refusal — so without this a question about the weather in Paris can move a device. Turning it off lets the model answer everything, including the things it should not.",
           "max_new_tokens": "A tool call is about 25 tokens. The extra room is for multi-command sentences; raising it does not make answers better.",
           "min_confidence": "Leave at 0 for a fine-tuned model. Fine-tuning does not update the confidence head, and correct non-English calls have been measured at 0.0, so any threshold above 0 would reject valid Hebrew commands."

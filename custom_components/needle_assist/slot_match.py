@@ -46,10 +46,12 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from typing import Any, Final, Iterable
 
 from .area_map import AREA_ALIASES, slug_for_name
 from .hebrew_text import PhraseIndex, normalise
+from .tool_router import FAMILY_NOUNS, _variants
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -172,6 +174,169 @@ def extract_message(utterance: str) -> str | None:
     return body or None
 
 
+# The verbs that open a request for music, in the masculine and feminine
+# imperative and future forms Israelis actually use. This is the same list the
+# household's own Music Assistant automation triggers on, which is where the
+# feature came from - the difference is that the automation hands the sentence
+# to a cloud LLM to turn into JSON, and this does it here, offline.
+_MUSIC_VERB: Final = re.compile(
+    r"^\s*(?:אה|אממ|נו|רגע|אוקיי|כאילו)?[,\s]*"
+    r"(?:נגן|נגני|תנגן|תנגני|השמע|השמיעי|תשמיע|תשמיעי|"
+    r"שים|שימי|תשים|תשימי|הפעל|הפעילי|תפעיל|תפעילי|"
+    r"האזן|האזני|תאזין|תאזיני|ערבב|ערבבי|תערבב|תערבבי)"
+    r"(?:\s+ל(?:י|נו))?\s+")
+
+# A word that says which *kind* of thing to play, and what it maps to in
+# ``music_assistant.play_media``. Order matters only in that each pattern is
+# anchored, so the first one that matches consumes its own word.
+_MEDIA_KINDS: Final[tuple[tuple[str, str], ...]] = (
+    ("track", r"ה?(?:שיר|רצועה|סינגל)"),
+    ("album", r"ה?(?:אלבום|תקליט|דיסק)"),
+    ("artist", r"ה?(?:אמן|אמנית|זמר|זמרת|להקה|הרכב)"),
+    ("playlist", r"ה?(?:פלייליסט|רשימת\s+השמעה|רשימת\s+ההשמעה)"),
+    ("radio", r"ה?(?:תחנת\s+רדיו|רדיו|תחנה)"),
+)
+_MEDIA_KIND_RE: Final = tuple(
+    (kind, re.compile(r"^(?:את\s+)?" + pattern + r"\b\s*"))
+    for kind, pattern in _MEDIA_KINDS
+)
+
+# "play me some music by X" - the noun carries no type of its own, it just
+# stands where one would be, and what follows ``של`` is an artist.
+_MUSIC_FILLER: Final = re.compile(r"^(?:את\s+)?(?:קצת\s+)?(?:מוזיקה|מוסיקה|משהו)\s*")
+_LEADING_ET: Final = re.compile(r"^\s*את\s+")
+# Anchored on either a space or the start, because the filler noun in
+# "play me some music by X" is consumed before this runs and leaves "של" first.
+_OF: Final = re.compile(r"(?:^|\s)של\s+")
+
+# Words that are grammar rather than a name. If nothing but these survives,
+# the speaker did not actually say what to play.
+# Every device noun the router knows, minus the media family - "מוזיקה" and
+# "שיר" are music words, not devices. A residue made only of these is a
+# machine in the house, not a record: "תפעיל את השואב" opens with a verb this
+# module recognises and leaves "השואב" behind, and searching a music library
+# for the vacuum cleaner is not what anybody meant.
+_DEVICE_NOUNS: Final = frozenset(
+    noun for family, nouns in FAMILY_NOUNS.items() if family != "media"
+    for noun in nouns
+)
+
+_NOT_A_NAME: Final = frozenset(
+    "הזה הזאת הזו זה זאת אותו אותה משהו מוזיקה מוסיקה שיר שירים את ה קצת עוד "
+    # Transport control wearing a title's clothes: "play the next song" leaves
+    # "הבא" behind once the kind word is consumed, and searching a library for
+    # "the next" finds nothing.
+    "הבא הקודם הבאה הקודמת אחרון אחרונה".split()
+)
+
+
+@dataclass(frozen=True)
+class MusicRequest:
+    """What to play, taken out of the sentence rather than out of the model.
+
+    The fields are ``music_assistant.play_media``'s: ``media_id`` is what to
+    search for and ``artist`` narrows it. Its ``album`` field is deliberately
+    left alone - for "the album Shablul by Kaveret" the album name *is* the
+    thing being searched for, and sending it as both narrows the search
+    against itself.
+    """
+
+    media_id: str
+    media_type: str | None = None
+    artist: str | None = None
+
+
+def extract_music(utterance: str) -> MusicRequest | None:
+    """Parse "play me X by Y" into a Music Assistant search.
+
+    ``תנגן לי את אם ננעלו של עומר אדם`` ->
+    ``MusicRequest("אם ננעלו", "track", artist="עומר אדם")``.
+
+    Returns None when the sentence asked for music but never said which - the
+    caller should resume playback rather than search for the word "music".
+
+    Deterministic on purpose. The model is never asked for the name: Hebrew
+    reaches a tool argument as ``\\uXXXX`` escapes, six exact characters per
+    letter, and a 45M-parameter model gets them wrong - the same reason
+    :func:`extract_message` exists. It also cannot be asked to *know* anything:
+    the household automation this replaces sends the sentence to a cloud LLM to
+    have song titles inferred, and nothing here does that. Music Assistant's
+    own search is what turns these words into a track, which is the component
+    that has the library.
+
+    Works on the raw sentence, like :func:`extract_message` and for the same
+    reason: the result is a search string, and folding final letters would ask
+    the library for ``עומר אדמ``.
+    """
+    text = " ".join(utterance.split())
+    opener = _MUSIC_VERB.match(text)
+    if not opener:
+        return None
+    rest = _POLITE_TAIL.sub("", text[opener.end():]).strip()
+
+    media_type: str | None = None
+    for kind, pattern in _MEDIA_KIND_RE:
+        if (hit := pattern.match(rest)):
+            media_type, rest = kind, rest[hit.end():]
+            break
+    else:
+        if (hit := _MUSIC_FILLER.match(rest)):
+            # "some music by X" names an artist and nothing narrower.
+            rest = rest[hit.end():]
+            media_type = "artist" if _OF.match(rest) or rest.startswith("של ") else None
+
+    rest = _LEADING_ET.sub("", rest).strip()
+    # The room is targeting, not part of the search. It has to go before the
+    # ``של`` split, because a room can contain one: "בחדר של הילדים".
+    rest = _strip_trailing_room(rest)
+
+    artist = None
+    if (split := _OF.search(rest)):
+        artist = rest[split.end():].strip()
+        rest = rest[:split.start()].strip()
+    rest = _LEADING_ET.sub("", rest).strip()
+
+    if not rest and artist:
+        rest, artist = artist, None
+    if not rest or all(w in _NOT_A_NAME for w in rest.split()) or _names_a_device(rest):
+        # "play something by X" - the artist is the only name in the sentence.
+        if artist:
+            return MusicRequest(artist, media_type or "artist")
+        return None
+
+    return MusicRequest(rest, media_type, artist=artist)
+
+
+def _names_a_device(text: str) -> bool:
+    """Is every word here the name of something in the house rather than music?"""
+    words = text.split()
+    return bool(words) and all(
+        word in _NOT_A_NAME or bool(_variants(word) & _DEVICE_NOUNS)
+        for word in words
+    )
+
+
+def _strip_trailing_room(text: str) -> str:
+    """Drop a room named at the end of a music request.
+
+    "play Kaveret in the living room" is a search for Kaveret, not for
+    "Kaveret in the living room". The room is matched against every room word
+    the project knows rather than this house's own, because getting it out of
+    the search string is right either way, and the house's own areas are what
+    :class:`SlotIndex` will use a moment later to decide where to play it.
+    """
+    words = text.split()
+    # Shortest tail first. Longest-first looked more careful and was wrong:
+    # "playlist לילה טוב בסלון" matches a room across all three words, because
+    # the room is inside them, and stripping all three leaves nothing to play.
+    # The shortest tail that is itself a room phrase is the room.
+    for take in range(1, min(3, len(words)) + 1):
+        tail = " ".join(words[-take:])
+        if tail.startswith(("ב", "ל")) and _ANY_ROOM.find(tail, fuzzy=False):
+            return " ".join(words[:-take])
+    return text
+
+
 def _forms_for_area(name: str, aliases: Iterable[str],
                     area_id: str) -> tuple[set[str], set[str]]:
     """Every Hebrew surface form that should reach this area, in two tiers.
@@ -282,21 +447,51 @@ class SlotIndex:
 
     def area_for_call(self, utterance: str, index: int = 0,
                       total: int = 1) -> str | None:
-        """The room the ``index``-th of ``total`` tool calls should target.
+        """The single room the ``index``-th of ``total`` calls should target."""
+        found = self.areas_for_call(utterance, index, total)
+        return found[0] if found else None
+
+    def areas_for_call(self, utterance: str, index: int = 0,
+                       total: int = 1) -> list[str]:
+        """The rooms the ``index``-th of ``total`` tool calls should target.
 
         A sentence with exactly as many room mentions as calls pairs them off
         in order: "turn the light on in the living room and close the blind in
         the kitchen" is two calls and two rooms, and they are not
-        interchangeable. Any other count gives every call the most specific
-        room in the sentence, which is right for the ordinary "turn on the
-        light and the air conditioning in the bedroom".
+        interchangeable.
+
+        One call and several rooms is the other shape - "turn off the light in
+        the living room and in the kitchen" - and it means all of them. That is
+        a list, not a choice, and answering it with one room leaves a light on.
+
+        The one thing that has to be got right here is telling those apart from
+        two *readings of the same words*. A house with a room called ``חדר``
+        and another called ``חדר ילדים`` matches both on the phrase "חדר
+        ילדים", and lighting the parent room because the child's room was named
+        is exactly the kind of over-reach the rest of this module exists to
+        prevent. Overlapping matches are therefore competing answers to one
+        question and the most specific wins; only rooms named in spans that do
+        not touch are two rooms.
         """
         found = self._area_index().find_occurrences(utterance)
         if not found:
-            return None
+            return []
         if len(found) == total and 0 <= index < total:
-            return found[index].value
-        return max(found, key=lambda match: match.rank).value
+            return [found[index].value]
+
+        if total == 1:
+            chosen: list[Any] = []
+            for match in sorted(found, key=lambda m: (-m.rank[0], m.start)):
+                if any(match.start < other.end and other.start < match.end
+                       for other in chosen):
+                    continue
+                chosen.append(match)
+            names = list(dict.fromkeys(
+                m.value for m in sorted(chosen, key=lambda m: m.start)))
+            if len(names) > 1:
+                return names
+
+        return [max(found, key=lambda match: match.rank).value]
 
     # -- entities -----------------------------------------------------------
     def _entity_index(self, domain: str) -> PhraseIndex:

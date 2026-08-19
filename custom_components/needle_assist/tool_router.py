@@ -67,8 +67,8 @@ FAMILY_TOOLS: Final[dict[str, list[str]]] = {
     "camera": ["camera_turn_on", "camera_turn_off"],
     "vacuum": ["vacuum_start", "vacuum_return_to_base", "vacuum_pause",
                "vacuum_set_fan_speed"],
-    "media": ["media_play", "media_pause", "media_set_volume", "media_mute",
-              "media_next_track", "media_select_source"],
+    "media": ["music_play", "media_play", "media_pause", "media_set_volume",
+              "media_mute", "media_next_track", "media_select_source"],
     "switch": ["switch_turn_on", "switch_turn_off"],
     "routine": ["scene_activate", "script_run", "automation_turn_on",
                 "automation_turn_off"],
@@ -108,6 +108,8 @@ FAMILY_NOUNS: Final[dict[str, list[str]]] = {
     # form is deliberate: bare "חזק" is also a vacuum suction level and a
     # climate fan speed.
     "media": ["מוזיקה", "מוסיקה", "שיר", "רמקול", "רמקולים", "נגן", "פודקאסט",
+              "שירים", "אלבום", "תקליט", "רצועה", "סינגל", "זמר", "זמרת",
+              "אמן", "אמנית", "להקה", "תחנה", "דיסק",
               "רדיו", "ווליום", "וליום", "עוצמה", "נגינה", "פלייליסט",
               "מיוזיק", "סאונד", "שאונד", "קול", "השתקה", "שקט", "מיוט",
               "יותר חזק", "יותר חלש",
@@ -169,6 +171,8 @@ FAMILY_VERBS: Final[dict[str, list[str]]] = {
     "vacuum": ["תשאב", "שאב", "לשאוב", "לנקות", "תנקה", "נקה", "שיחזור",
                "לבסיס", "לתחנה", "לעגינה", "תשאבי", "שאבי", "תנקי", "נקי"],
     "media": ["נגן", "תנגן", "השמע", "תשמיע", "השתק", "תשתיק", "תדלג",
+              "האזן", "תאזין", "האזני", "תאזיני", "ערבב", "תערבב", "ערבבי",
+              "תערבבי",
               "דלג", "עצור", "תעצור", "תפסיק", "השהה", "תשהה", "נגני", "תנגני", "השמיעי", "תשמיעי", "השתיקי", "תשתיקי", "תדלגי", "דלגי", "עצרי", "תעצרי", "תפסיקי", "תשהי", "תשהי"],
     "switch": ["טרן", "און", "אוף", "תסוויץ'"],
     "routine": ["הפעל", "תפעיל", "הרץ", "תריץ", "הפעילי", "תפעילי", "הריצי", "תריצי"],
@@ -199,6 +203,8 @@ TOOL_HINTS: Final[dict[str, list[str]]] = {
     "climate_turn_off": ["כבה", "תכבה", "תכבי", "כבי", "סגור", "תסגור",
                          "תפסיק", "כיבוי", "אוף", "סגרי", "תסגרי", "תפסיקי"],
     "climate_set_temperature": ["מעלות", "טמפרטורה", "תעלה", "תוריד", "חם",
+                                "שים", "תשים", "תשימי", "שימי", "הגדר",
+                                "תגדיר", "תסדר", "תסדרי",
                                 "קר", "מעלה", "תעלי", "תורידי",
                                 "קר מדי", "חם מדי", "תחמם", "תקרר"],
     "climate_set_hvac_mode": ["קירור", "חימום", "אוטומטי", "יבש", "מאוורר"],
@@ -221,6 +227,17 @@ TOOL_HINTS: Final[dict[str, list[str]]] = {
     "vacuum_set_fan_speed": ["מהירות", "חזק", "שקט", "עוצמה"],
     "switch_turn_on": ["הדלק", "תדליק", "הפעל", "תפעיל", "און", "טרן", "הדליקי", "תדליקי", "הפעילי", "תפעילי"],
     "switch_turn_off": ["כבה", "תכבה", "תכבי", "סגור", "תסגור", "אוף", "כבי", "סגרי", "תסגרי"],
+    # No "שיר" here, deliberately. It is a media noun - it belongs in the
+    # family table above, where it says "this sentence is about audio" - but as
+    # a tool hint it ties with "תעצור" on "תעצור את השיר" and wins the tie on
+    # position alone, which turns "stop the song" into a request to play one.
+    # What actually separates playing a named thing from resuming is the word
+    # for the *kind* of thing.
+    "music_play": ["אלבום", "תקליט", "דיסק", "רצועה",
+                   "סינגל", "פלייליסט", "רדיו", "תחנה", "זמר", "זמרת",
+                   "אמן", "אמנית", "להקה", "הרכב",
+                   "האזן", "תאזין", "האזני", "תאזיני",
+                   "ערבב", "תערבב", "ערבבי", "תערבבי"],
     "media_play": ["נגן", "תנגן", "השמע", "תשמיע", "שים", "תשים", "נגני", "תנגני", "השמיעי", "תשמיעי"],
     "media_set_volume": ["ווליום", "וליום", "קול", "עוצמה", "סאונד", "שאונד",
                          "תגביר", "תנמיך", "הגבר", "נמיך", "אחוז", "חצי",

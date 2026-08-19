@@ -19,13 +19,14 @@ from homeassistant.config_entries import (
 )
 from homeassistant.core import callback
 from homeassistant.helpers.selector import (
-    BooleanSelector, NumberSelector, NumberSelectorConfig, NumberSelectorMode,
+    BooleanSelector, EntitySelector, EntitySelectorConfig, NumberSelector,
+    NumberSelectorConfig, NumberSelectorMode,
 )
 
 from .const import (
-    BUNDLED_WEIGHTS, CONF_CONFIDENCE, CONF_MAX_TOKENS, CONF_REFUSE_GATE,
-    CONF_WEIGHTS, DEFAULT_CONFIDENCE, DEFAULT_MAX_TOKENS, DEFAULT_REFUSE_GATE,
-    DOMAIN,
+    BUNDLED_WEIGHTS, CONF_CONFIDENCE, CONF_MAX_TOKENS, CONF_MUSIC_PLAYER,
+    CONF_REFUSE_GATE, CONF_WEIGHTS, DEFAULT_CONFIDENCE, DEFAULT_MAX_TOKENS,
+    DEFAULT_REFUSE_GATE, DOMAIN,
 )
 
 STEP_USER = vol.Schema({
@@ -96,6 +97,20 @@ class NeedleAssistOptionsFlow(OptionsFlow):
 
         options = self.config_entry.options
         schema = vol.Schema({
+            # Filtered to the integration whose service actually accepts the
+            # call, so the list cannot offer a speaker that would fail. A
+            # household with no Music Assistant sees an empty picker, which
+            # reads correctly as "this does not apply here", and one with a
+            # single player never needs it - that player is the only answer.
+            vol.Optional(
+                CONF_MUSIC_PLAYER,
+                description={
+                    "suggested_value": options.get(CONF_MUSIC_PLAYER)
+                },
+            ): EntitySelector(
+                EntitySelectorConfig(domain="media_player",
+                                     integration="music_assistant")
+            ),
             vol.Optional(
                 CONF_REFUSE_GATE,
                 default=options.get(CONF_REFUSE_GATE, DEFAULT_REFUSE_GATE),

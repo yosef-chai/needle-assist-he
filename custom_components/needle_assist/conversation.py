@@ -25,7 +25,7 @@ from homeassistant.helpers import (
 )
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import tool_router
+from . import clause_split, tool_router
 from .const import (
     CONF_CONFIDENCE, CONF_MAX_TOKENS, CONF_REFUSE_GATE, DEFAULT_CONFIDENCE,
     DEFAULT_MAX_TOKENS, DEFAULT_REFUSE_GATE, DOMAIN, SPEECH_FAILED,
@@ -57,7 +57,7 @@ class NeedleConversationEntity(conversation.ConversationEntity):
         self.hass = hass
         self.entry = entry
         self._runner = hass.data[DOMAIN][entry.entry_id]
-        self._executor = CallExecutor(hass)
+        self._executor = CallExecutor(hass, entry)
         self._attr_unique_id = entry.entry_id
 
     async def async_added_to_hass(self) -> None:
@@ -125,66 +125,76 @@ class NeedleConversationEntity(conversation.ConversationEntity):
                 response=response, conversation_id=user_input.conversation_id
             )
 
-        try:
-            result = await self.hass.async_add_executor_job(
-                self._runner.complete, user_input.text, max_tokens
-            )
-        except Exception as err:
-            _LOGGER.exception("Needle inference failed")
-            response.async_set_error(
-                intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
-                f"{SPEECH_FAILED}: {err}",
-            )
-            return conversation.ConversationResult(
-                response=response, conversation_id=user_input.conversation_id
-            )
+        # One order per clause. "turn off the light in the kitchen and close
+        # the blinds in the bedroom" is two commands, and asking the model for
+        # both at once returns one call for 94 of 97 such sentences - see
+        # `clause_split` for the measurement and for the three explanations
+        # that were ruled out first. Splitting first takes the same rows from
+        # 0.0% to 75.3% tool-set accuracy on the same weights.
+        clauses = clause_split.split_clauses(user_input.text)
+        if len(clauses) > 1:
+            _LOGGER.debug("%r split into %s", user_input.text, clauses)
 
-        calls = self._runner.calls_of(result)
-        confidence = float(result.get("confidence") or 0.0)
-        _LOGGER.debug("%r -> %s (confidence %.3f)", user_input.text, calls, confidence)
+        outcomes = []
+        for clause in clauses:
+            try:
+                result = await self.hass.async_add_executor_job(
+                    self._runner.complete, clause, max_tokens
+                )
+            except Exception as err:
+                _LOGGER.exception("Needle inference failed")
+                response.async_set_error(
+                    intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                    f"{SPEECH_FAILED}: {err}",
+                )
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
 
-        # Distinguish a genuine refusal from a broken generation. Both arrive as
-        # an empty call list; only `success`/`error` tell them apart.
-        if (failure := self._runner.failed(result)) is not None:
-            _LOGGER.error("engine failure on %r: %s", user_input.text, failure)
-            response.async_set_error(
-                intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
-                f"{SPEECH_FAILED}: {failure}",
-            )
-            return conversation.ConversationResult(
-                response=response, conversation_id=user_input.conversation_id
-            )
+            calls = self._runner.calls_of(result)
+            confidence = float(result.get("confidence") or 0.0)
+            _LOGGER.debug("%r -> %s (confidence %.3f)", clause, calls, confidence)
+
+            # Distinguish a genuine refusal from a broken generation. Both
+            # arrive as an empty call list; only `success`/`error` tell them
+            # apart.
+            if (failure := self._runner.failed(result)) is not None:
+                _LOGGER.error("engine failure on %r: %s", clause, failure)
+                response.async_set_error(
+                    intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                    f"{SPEECH_FAILED}: {failure}",
+                )
+                return conversation.ConversationResult(
+                    response=response, conversation_id=user_input.conversation_id
+                )
+
+            # Off by default: the confidence head is not updated by fine-tuning
+            # and reads 0.0 on correct non-English calls. See
+            # const.DEFAULT_CONFIDENCE.
+            if min_conf > 0 and confidence < min_conf:
+                _LOGGER.info("dropped call at confidence %.3f < %.3f",
+                             confidence, min_conf)
+                continue
+
+            for index, call in enumerate(calls):
+                outcomes.append(
+                    # The clause goes with every call it produced, and so does
+                    # the call's position among its siblings. Targeting is
+                    # resolved from the words against this installation's own
+                    # areas and entities rather than from the model's slugs -
+                    # see the module docstring of `executor` - and a two-room
+                    # clause needs to know which room goes with which call.
+                    await self._executor.execute(call, user_input.device_id,
+                                                 user_input.context, clause,
+                                                 index, len(calls))
+                )
 
         # An empty call list is Needle's refusal for anything no tool serves.
         # It is a valid answer, not a failure.
-        if not calls:
+        if not outcomes:
             response.async_set_speech(SPEECH_NOTHING)
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id
-            )
-
-        # Off by default: the confidence head is not updated by fine-tuning and
-        # reads 0.0 on correct non-English calls. See const.DEFAULT_CONFIDENCE.
-        if min_conf > 0 and confidence < min_conf:
-            _LOGGER.info("dropped call at confidence %.3f < %.3f", confidence, min_conf)
-            response.async_set_speech(SPEECH_NOTHING)
-            return conversation.ConversationResult(
-                response=response, conversation_id=user_input.conversation_id
-            )
-
-        outcomes = []
-        for index, call in enumerate(calls):
-            outcomes.append(
-                # The original sentence goes with every call, and so does the
-                # call's position among its siblings. Targeting is resolved from
-                # the sentence against this installation's own areas and
-                # entities rather than from the model's slugs - see the module
-                # docstring of `executor` - and a two-room sentence needs to
-                # know which room goes with which call.
-                await self._executor.execute(call, user_input.device_id,
-                                             user_input.context,
-                                             user_input.text,
-                                             index, len(calls))
             )
 
         spoken = [o.speech for o in outcomes if o.ok and o.speech]

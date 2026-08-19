@@ -47,15 +47,22 @@ from homeassistant.core import HomeAssistant, Context
 from homeassistant.helpers import (
     area_registry as ar,
     device_registry as dr,
+    entity_registry as er,
     intent,
 )
 
 from . import slot_match, tool_router
 from .const import (
-    NON_SERVICE_ARGS, QUERY_TOOLS, SERVICE_MAP, TOOL_DOMAIN, WEATHER_STATES_HE,
+    CONF_MUSIC_PLAYER, NON_SERVICE_ARGS, QUERY_TOOLS, SERVICE_MAP, TOOL_DOMAIN,
+    WEATHER_STATES_HE,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# The integration whose media_player entities music_assistant.play_media can
+# target. Named once here because it is both the registry test and the reason
+# the tool degrades gracefully in a house that does not have it.
+MUSIC_INTEGRATION = "music_assistant"
 
 # Domains whose "name" argument identifies the entity itself rather than a
 # device inside an area: scene.evening, script.good_night, timer.pasta.
@@ -84,9 +91,18 @@ class CallOutcome:
 class CallExecutor:
     """Executes Needle tool calls against Home Assistant."""
 
-    def __init__(self, hass: HomeAssistant) -> None:
+    def __init__(self, hass: HomeAssistant, entry: Any = None) -> None:
         self.hass = hass
         self.slots = slot_match.SlotIndex(hass)
+        # The config entry rather than a snapshot of its options: Home
+        # Assistant replaces the options mapping when the user saves the
+        # dialog, so a copy taken at setup would go stale the first time
+        # somebody changed the default speaker.
+        self._entry = entry
+
+    @property
+    def options(self) -> dict:
+        return dict(getattr(self._entry, "options", None) or {})
 
     # -- targeting ----------------------------------------------------------
     def _device_area_id(self, device_id: str | None) -> str | None:
@@ -101,10 +117,12 @@ class CallExecutor:
 
     def _target_area(self, device_id: str | None, utterance: str = "",
                      index: int = 0, total: int = 1
-                     ) -> tuple[str | None, bool, bool]:
-        """Resolve the target area from what was said.
+                     ) -> tuple[list[str], bool, bool]:
+        """Resolve the target areas from what was said.
 
-        Returns ``(area_id, is_all, unresolvable)``.
+        Returns ``(area_ids, is_all, unresolvable)``. The list is usually one
+        room; it is longer when one order named several - "turn off the light
+        in the living room and in the kitchen" is one call and two rooms.
 
         ``unresolvable`` is the important one. If the speaker named a room and
         this house does not have it, the command must fail rather than widen.
@@ -117,38 +135,45 @@ class CallExecutor:
         """
         if utterance:
             if slot_match.mentions_whole_home(utterance):
-                return None, True, False
-            area_id = self.slots.area_for_call(utterance, index, total)
-            if area_id:
-                return area_id, False, False
+                return [], True, False
+            area_ids = self.slots.areas_for_call(utterance, index, total)
+            if area_ids:
+                return area_ids, False, False
             # "turn off all the lights" - every device, no place named.
             if slot_match.mentions_every_device(utterance):
-                return None, True, False
+                return [], True, False
             if slot_match.names_a_room(utterance):
                 fallback = self._device_area_id(device_id)
                 if fallback:
                     _LOGGER.debug(
                         "a room was named but this installation has no such "
                         "area; using the device's own area")
-                    return fallback, False, False
+                    return [fallback], False, False
                 _LOGGER.warning(
                     "%r names a room this installation does not have, and there "
                     "is no device area to fall back on; refusing rather than "
                     "targeting the whole house", utterance)
-                return None, False, True
+                return [], False, True
 
         # No room named: "wherever I am". An unknown device area leaves this
         # unconstrained, which matches how Home Assistant's own intents behave
         # for an area-less command.
-        return self._device_area_id(device_id), False, False
+        own = self._device_area_id(device_id)
+        return ([own] if own else []), False, False
 
-    def _match_entities(self, domain: str, area_id: str | None,
+    def _match_entities(self, domain: str, area_ids: list[str],
                         all_areas: bool) -> list[str]:
-        area_name = None
-        if area_id and not all_areas:
-            area = ar.async_get(self.hass).async_get_area(area_id)
-            area_name = area.name if area else None
+        """Entities of ``domain`` in every named area, in the order named."""
+        if all_areas or not area_ids:
+            return self._match_in_area(domain, None)
+        registry = ar.async_get(self.hass)
+        found: list[str] = []
+        for area_id in area_ids:
+            area = registry.async_get_area(area_id)
+            found.extend(self._match_in_area(domain, area.name if area else None))
+        return list(dict.fromkeys(found))
 
+    def _match_in_area(self, domain: str, area_name: str | None) -> list[str]:
         constraints = intent.MatchTargetsConstraints(
             domains=[domain],
             area_name=area_name,
@@ -273,6 +298,26 @@ class CallExecutor:
             return await self._answer_query(tool, args, device_id, utterance,
                                             index, total)
 
+        # "Play" and "play *this*" are one verb apart in Hebrew, and which one
+        # was meant is decided by whether a name follows - which the sentence
+        # settles and the model has to guess. So when the model says "resume"
+        # about a sentence that named something specific, the sentence wins.
+        #
+        # This is the same rule the rest of this module runs on, and it is
+        # safe here for the same reason: it never overrides which *domain* was
+        # chosen. The model has already decided the utterance is about audio -
+        # "תפעיל את השואב" gets vacuum_start and is never seen here - so all
+        # that is being corrected is which of two media tools inside that
+        # decision. It also makes the tool work before any model knows it
+        # exists, which is what a household running the previous weights has.
+        if tool == "media_play" and utterance and slot_match.extract_music(utterance):
+            _LOGGER.debug("the sentence names something to play; using music_play")
+            tool = "music_play"
+
+        if tool == "music_play":
+            return await self._play_music(args, device_id, context, utterance,
+                                          index, total)
+
         if tool not in SERVICE_MAP:
             return CallOutcome(tool, False, f"unknown tool {tool}")
 
@@ -302,11 +347,11 @@ class CallExecutor:
             if entity_ids:
                 _LOGGER.debug("targeting named entities %s", entity_ids)
             else:
-                area_id, all_areas, unresolvable = self._target_area(
+                area_ids, all_areas, unresolvable = self._target_area(
                     device_id, utterance, index, total)
                 if unresolvable:
                     return CallOutcome(tool, False, "no matching entities")
-                entity_ids = self._match_entities(domain, area_id, all_areas)
+                entity_ids = self._match_entities(domain, area_ids, all_areas)
 
         if not entity_ids:
             return CallOutcome(tool, False, "no matching entities")
@@ -322,6 +367,105 @@ class CallExecutor:
             return CallOutcome(tool, False, str(err))
 
         return CallOutcome(tool, True, entities=len(entity_ids))
+
+    # -- music --------------------------------------------------------------
+    def _music_players(self, area_ids: list[str], all_areas: bool) -> list[str]:
+        """Music Assistant players, narrowed to an area when one was named.
+
+        ``music_assistant.play_media`` targets media_player entities that the
+        music_assistant integration provides - its own service definition says
+        so - so an ordinary Sonos or Chromecast entity is not a legal target
+        even though it plays audio. The registry's ``platform`` field is the
+        same test the service applies.
+        """
+        registry = er.async_get(self.hass)
+        players = [
+            entry.entity_id
+            for entry in registry.entities.values()
+            if entry.domain == "media_player"
+            and entry.platform == MUSIC_INTEGRATION
+            and not entry.disabled_by
+        ]
+        if not players or all_areas or not area_ids:
+            return players
+        in_area = [
+            eid for eid in players
+            if (entry := registry.async_get(eid))
+            and (entry.area_id or self._device_area_id(entry.device_id)) in area_ids
+        ]
+        # A named room with no Music Assistant player in it falls back to every
+        # player rather than to silence: the caller has already decided the
+        # room is real, and the configured default is checked next.
+        return in_area or players
+
+    async def _play_music(self, args: dict, device_id: str | None,
+                          context: Context, utterance: str,
+                          index: int, total: int) -> CallOutcome:
+        """Search Music Assistant for what the sentence named, and play it.
+
+        Three things can happen, and all three are ordinary:
+
+        * The sentence named something - play it.
+        * The sentence asked for music without naming any - "תנגן מוזיקה
+          בסלון". There is nothing to search for, so this resumes playback,
+          which is what the words mean.
+        * This house has no Music Assistant at all. The tool then degrades to
+          ``media_player.media_play`` on whatever speaker the room has, so a
+          household without it is no worse off than before the tool existed.
+        """
+        area_ids, all_areas, unresolvable = self._target_area(
+            device_id, utterance, index, total)
+        if unresolvable:
+            return CallOutcome("music_play", False, "no matching entities")
+
+        players = self._music_players(area_ids, all_areas)
+        request = slot_match.extract_music(utterance) if utterance else None
+
+        if not players:
+            _LOGGER.debug("no Music Assistant player; resuming playback instead")
+            speakers = self._match_entities("media_player", area_ids, all_areas)
+            if not speakers:
+                return CallOutcome("music_play", False, "no matching entities")
+            return await self._call("media_player", "media_play",
+                                    {"entity_id": speakers}, context, "music_play",
+                                    len(speakers))
+
+        if len(players) > 1 and (chosen := self._configured_player(players)):
+            players = [chosen]
+
+        if request is None:
+            return await self._call("media_player", "media_play",
+                                    {"entity_id": players}, context, "music_play",
+                                    len(players))
+
+        data: dict[str, Any] = {"entity_id": players, "media_id": request.media_id}
+        # The sentence beats the model. It said "the album Shablul" in words;
+        # the model guessed from five options.
+        media_type = request.media_type or args.get("media_type")
+        if media_type:
+            data["media_type"] = media_type
+        if request.artist:
+            data["artist"] = request.artist
+        return await self._call(*SERVICE_MAP["music_play"], data, context,
+                                "music_play", len(players),
+                                speech=f"מנגן {request.media_id}")
+
+    def _configured_player(self, players: list[str]) -> str | None:
+        """The speaker chosen in the options, if it is still a real player."""
+        chosen = self.options.get(CONF_MUSIC_PLAYER)
+        return chosen if chosen in players else None
+
+    async def _call(self, domain: str, service: str, data: dict,
+                    context: Context, tool: str, entities: int,
+                    speech: str | None = None) -> CallOutcome:
+        """One service call, with the failure path every caller needs."""
+        try:
+            await self.hass.services.async_call(
+                domain, service, data, blocking=True, context=context)
+        except Exception as err:  # service validation, unavailable device, ...
+            _LOGGER.error("%s.%s failed: %s", domain, service, err)
+            return CallOutcome(tool, False, str(err))
+        return CallOutcome(tool, True, entities=entities, speech=speech)
 
     # -- read-only ----------------------------------------------------------
     async def _answer_query(self, tool: str, args: dict,
@@ -351,11 +495,11 @@ class CallExecutor:
                       if utterance and domain in slot_match.NAMEABLE_DOMAINS
                       else [])
         if not entity_ids:
-            area_id, all_areas, unresolvable = self._target_area(
+            area_ids, all_areas, unresolvable = self._target_area(
                 device_id, utterance, index, total)
             if unresolvable:
                 return CallOutcome(tool, False, "no matching entities")
-            entity_ids = self._match_entities(domain, area_id, all_areas)
+            entity_ids = self._match_entities(domain, area_ids, all_areas)
         if not entity_ids:
             return CallOutcome(tool, False, "no matching entities")
 

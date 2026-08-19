@@ -17,6 +17,8 @@
 ```
 "תדליק את האור בסלון"                        → light.turn_on
 "סגור את התריסים בחדר של הילדים"              → cover.close_cover
+"תכבה את האור בסלון וסגור את התריסים"         → שתי פעולות במשפט אחד
+"תנגן לי את אם ננעלו של עומר אדם"             → music_assistant.play_media
 "מה המצב של המזגן במטבח"                      → get_state   ← לא יפעיל כלום
 "שים את המזגן על 23 בחדר שינה"                 → climate.set_temperature
 "תפעיל את מצב לילה"                           → scene.turn_on
@@ -28,9 +30,11 @@
 
 ## מה זה עושה
 
-- **41 כלים**, כולם שירותים אמיתיים של Home Assistant — תאורה, תריסים, מיזוג, מנעולים, מדיה, שקעים, שואב, מצלמות, סצנות, סקריפטים, אוטומציות, טיימרים, התראות ושאילתות מצב.
+- **42 כלים**, כולם שירותים אמיתיים של Home Assistant — תאורה, תריסים, מיזוג, מנעולים, מדיה, מוזיקה, שקעים, שואב, מצלמות, סצנות, סקריפטים, אוטומציות, טיימרים, התראות ושאילתות מצב.
 - **מזהה את החדרים של הבית שלך**, לא רשימה קבועה מראש. אם יש לך "הול", "חדר כביסה" או "פינת קפה" — הם יעבדו, כולל בכינויים שהגדרת ב‑Home Assistant.
 - **מבין עברית מדוברת**: תחיליות (בסלון, ולמטבח, שבמקלחת), אותיות סופיות במקום הלא נכון, מילים דבוקות מזיהוי דיבור, וטעויות הקלדה.
+- **כמה פעולות במשפט אחד.** "תכבה את האור במטבח וסגור את התריסים בחדר שינה" זה שתי פקודות, והן מבוצעות שתיהן. המשפט נחתך לפני שהמודל רואה אותו, ורק במקום שבו באמת מתחילה פקודה חדשה — "תדליק את האור בסלון ובמטבח" נשאר פקודה אחת שפועלת על שני החדרים.
+- **מנגן מוזיקה בשם** דרך [Music Assistant](https://www.music-assistant.io/): "תנגן לי את האלבום שבלול של כוורת", "שים פלייליסט רגוע בסלון", "תנגן רדיו גלגלצ". שם השיר נקרא מהמשפט, לא מומצא על ידי המודל. בלי Music Assistant מותקן זה פשוט ממשיך נגינה על הרמקול שבחדר.
 - **שאלה לא יכולה להפעיל כלום.** "מה המצב של האור במטבח" מחזיר תשובה — הוא לא מדליק את האור.
 - **מסרב למה שלא קשור לבית**, ומסרב לפקודות שליליות ("אל תדליק").
 - עונה בעברית.
@@ -96,11 +100,12 @@
 
 | | |
 |---|---|
-| בחירת הכלי הנכון | 63.5% |
-| כלי **וגם** כל הארגומנטים | 42.5% |
+| בחירת הכלי הנכון | 66.8% |
+| כלי **וגם** כל הארגומנטים | 44.2% |
+| משפט עם כמה פקודות — בחירת הכלים | **75.3%** (היה 0.0%) |
 | זיהוי החדר (בקוד, לא במודל) | **99.0%** |
 | זיהוי חדר במילים נרדפות שלא נראו באימון | **100%** |
-| ניתוב לכלי הנכון (רשימה מקוצרת) | 98.5% |
+| ניתוב לכלי הנכון (רשימה מקוצרת) | 98.8% |
 | שאלות שקיבלו כלים לקריאה בלבד, ולכן לא יכלו להפעיל כלום | 82.0% |
 | פקודות אמיתיות שסווגו בטעות כשאלה | **0 מתוך 15,709** |
 | סירוב נכון לאמירות מחוץ לתחום | 73.9% |
@@ -114,7 +119,9 @@
 
 הרשימה הזו כתובה במלואה בכוונה. עדיף לדעת מראש.
 
-- **משפט עם שתי פקודות לא עובד.** "תדליק את האור וסגור את התריס" — 0% הצלחה. תגיד שתי אמירות.
+- **כל פקודה במשפט עולה זמן.** המשפט נחתך לפי פקודות והמודל רץ פעם אחת לכל אחת — כשתי שניות וחצי לפקודה על חומרת ARM. לכן יש תקרה של ארבע פקודות במשפט אחד.
+- **חיתוך המשפט מסתמך על פועל.** "תדליק את האור בסלון, ובמטבח תסגור" — פועל שבא אחרי החדר במקום לפניו — לא תמיד ייחתך נכון. הניסוח הרגיל, פועל בתחילת כל פקודה, כן.
+- **מוזיקה בשם דורשת [Music Assistant](https://www.music-assistant.io/).** בלעדיו "תנגן לי כוורת" פשוט ימשיך נגינה על הרמקול שבחדר, כי אין ספרייה לחפש בה. שם השיר נקרא מהמשפט — המודל לא ממציא שמות ולא "יודע" באיזה אלבום שיר נמצא; החיפוש עצמו נעשה על ידי Music Assistant.
 - **שאלה בלי מילת שאלה לא תמיד מזוהה ככזו.** "התריס בסלון פתוח" בלי סימן שאלה עמום גם בעברית; כ‑18% מהשאלות נופלות לשם. הן לא יפעילו כלום בטעות, אבל הן עלולות לא לענות.
 - **המודל עצמו לא מסרב לכלום** — שיעור הסירוב הנכון שלו נמדד ב‑0.0%. הסירוב כולו נעשה בקוד, ותופס 73.9% מהאמירות שמחוץ לתחום. השאר יגיעו למודל.
 - **רף הביטחון לא שמיש.** הכיוונון לא מעדכן את ראש הביטחון של המנוע, וקריאות נכונות שאינן באנגלית נמדדו עם ביטחון 0.0. כל רף מעל 0 ידחה פקודות תקינות. לכן ברירת המחדל 0.
@@ -149,9 +156,11 @@ The model, the engine and the logic all run on the machine running Home Assistan
 
 ## What it does
 
-- **41 tools**, every one a real Home Assistant service: lights, covers, climate, locks, media, switches, vacuum, cameras, scenes, scripts, automations, timers, notifications and state queries.
+- **42 tools**, every one a real Home Assistant service: lights, covers, climate, locks, media, music, switches, vacuum, cameras, scenes, scripts, automations, timers, notifications and state queries.
 - **Knows your rooms**, not a fixed list. A house with a "הול" or a "חדר כביסה" works, aliases included.
 - **Handles spoken Hebrew**: prefix particles, misplaced final letters, words glued together by speech-to-text, and typos.
+- **Several orders in one sentence.** "Turn off the kitchen light and close the bedroom blinds" is two commands and both run. The sentence is cut before the model sees it, and only where a new order really begins — "turn on the light in the living room and the kitchen" stays one order over two rooms.
+- **Plays music by name** through [Music Assistant](https://www.music-assistant.io/): the title, the artist and the kind are read out of the sentence, never invented by the model. Without Music Assistant installed it simply resumes playback on the room's speaker.
 - **A question cannot actuate.** Asking the state of a light answers; it does not switch it.
 - **Refuses** what is not about the house, and refuses negated commands.
 
@@ -171,11 +180,12 @@ On 400 unseen held-out rows, and across all 18,806 generated rows:
 
 | | |
 |---|---|
-| correct tool | 63.5% |
-| tool **and** every argument | 42.5% |
+| correct tool | 66.8% |
+| tool **and** every argument | 44.2% |
+| multi-order sentences, correct tool set | **75.3%** (was 0.0%) |
 | room resolution (in code, not in the model) | **99.0%** |
 | room resolution, synonyms never seen in training | **100%** |
-| tool shortlist recall | 98.5% |
+| tool shortlist recall | 98.8% |
 | questions given read-only tools only, so they cannot actuate | 82.0% |
 | real commands wrongly classified as questions | **0 of 15,709** |
 | off-topic correctly refused | 73.9% |
@@ -187,7 +197,9 @@ See [`docs/HOW-IT-WORKS.md`](docs/HOW-IT-WORKS.md).
 
 ## Known limitations
 
-- **Two commands in one sentence do not work** — 0% on multi-command utterances. Say them separately.
+- **Each order in a sentence costs time.** The sentence is cut into orders and the model runs once per order — about 2.5 s each on ARM — so there is a cap of four.
+- **Cutting the sentence relies on a verb.** An order whose verb comes after the room rather than before it may not be separated. The ordinary phrasing, a verb at the head of each order, is.
+- **Playing music by name needs [Music Assistant](https://www.music-assistant.io/).** Without it, a request to play something resumes the room's speaker instead, because there is no library to search. The title comes out of the sentence; nothing here tries to *know* which album a song is on — Music Assistant does the lookup.
 - **A question with no interrogative** ("the blind in the living room [is] open") is not always recognised as one. It cannot actuate by accident, but it may not answer.
 - **The model itself never refuses anything** — 0.0% correct refusal measured. Refusal is done in code and catches 73.9% of off-topic utterances.
 - **The confidence threshold is unusable.** Fine-tuning does not update the engine's confidence head and correct non-English calls measure 0.0, so any threshold above 0 rejects valid commands. Hence the default of 0.

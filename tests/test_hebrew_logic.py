@@ -19,6 +19,7 @@ from conftest import load  # noqa: E402
 TEXT = load("hebrew_text")
 ROUTER = load("tool_router")
 SLOT = load("slot_match")
+CLAUSE = load("clause_split")
 
 
 # --- invented installations -------------------------------------------------
@@ -219,3 +220,141 @@ def test_the_model_is_bundled():
                / "needle_assist" / "needle_he.cact")
     assert weights.is_file(), "needle_he.cact is missing from the release"
     assert weights.stat().st_size > 10_000_000, "weights look truncated"
+
+
+# --- several orders in one sentence -----------------------------------------
+
+def test_a_sentence_with_two_orders_becomes_two_clauses():
+    """Asked for both at once the model answers with one call.
+
+    Measured on the held-out set: 94 of 97 such sentences come back as a single
+    call, usually the verb of one clause with the room of another, for 0.0%
+    tool-set accuracy. Cutting first, on the same weights, scores 75.3%.
+    """
+    assert CLAUSE.split_clauses("תדליק את האור בסלון וסגור את התריסים בחדר שינה") == [
+        "תדליק את האור בסלון", "סגור את התריסים בחדר שינה"]
+    assert CLAUSE.split_clauses("כבה את האור במטבח וגם תנעל את הדלת") == [
+        "כבה את האור במטבח", "תנעל את הדלת"]
+    assert CLAUSE.split_clauses(
+        "תפעיל את הרובוט, נעל את הדלת, תסגור את התריסים בסלון") == [
+        "תפעיל את הרובוט", "נעל את הדלת", "תסגור את התריסים בסלון"]
+
+
+def test_coordination_that_is_not_a_second_order_is_left_alone():
+    """A cut survives only if both sides carry an action verb.
+
+    Each of these contains a joining word and one order. Cutting any of them
+    would invent a second command with nothing to act on.
+    """
+    for sentence in (
+        "תדליק את האור בסלון ובמטבח",      # two rooms
+        "תדליק את האור והמזגן בסלון",      # two devices
+        "אה, סגור את האור בסלון",           # a filler is not an order
+        "תכבה את האור בסלון, תודה",         # nor is a polite tail
+        "מה המצב של האור בסלון ובמטבח",     # a question is answered as one
+    ):
+        assert CLAUSE.split_clauses(sentence) == [sentence], sentence
+
+
+def test_each_clause_is_still_a_command_the_router_can_read():
+    """A clause that lost its verb would route to nothing."""
+    clauses = CLAUSE.split_clauses(
+        "תדליק את האור בסלון וסגור את התריסים בחדר שינה וגם תנעל את הדלת")
+    assert [ROUTER.select_tool_names(c)[0] for c in clauses] == [
+        "light_turn_on", "cover_close", "lock_lock"]
+
+
+def test_the_splitter_and_the_router_share_one_verb_list():
+    """A verb added for routing has to become a cut point too."""
+    for family, verbs in ROUTER.FAMILY_VERBS.items():
+        if family == "query":
+            continue
+        for verb in verbs:
+            assert ROUTER._fold(verb) in CLAUSE.ACTION_VERBS, verb
+    assert "מה" not in CLAUSE.ACTION_VERBS
+
+
+# --- one order, several rooms -----------------------------------------------
+
+def rooms(house, utterance, index=0, total=1):
+    """`SlotIndex.areas_for_call` over an invented registry."""
+    import types
+    built = SLOT.build_area_index(house)
+    return SLOT.SlotIndex.areas_for_call(
+        types.SimpleNamespace(_area_index=lambda: built), utterance, index, total)
+
+
+def test_one_order_naming_two_rooms_targets_both():
+    """"Turn the light off in the living room and the kitchen" is two rooms.
+
+    The splitter leaves this as one clause on purpose - "ובמטבח" is a place,
+    not a second order - so the room list is what makes both lights go out.
+    """
+    assert rooms(DRIFTED, "תכבה את האור בסלון ובמטבח") == ["mtbkh_2"]
+    assert rooms(WIDE, "תכבה את האור בסלון ובמחסן") == ["living", "store"]
+
+
+def test_two_readings_of_one_room_phrase_are_not_two_rooms():
+    """The case that makes overlap matter.
+
+    "חדר הורים" also matches the alias "חדר שינה" logic and any shorter room
+    word inside it. One room, named once, read two ways - and lighting a second
+    room because of it is exactly the over-reach the resolver exists to stop.
+    """
+    assert rooms(DRIFTED, "תדליק את האור בחדר הורים") == ["bedroom"]
+    assert rooms(SPLIT, "תדליק את האור במקלחת") == ["shower"]
+
+
+def test_as_many_rooms_as_calls_still_pairs_them_off():
+    """n rooms and n calls go in order; that rule is untouched."""
+    sentence = "תדליק את האור בסלון וסגור את התריסים במחסן"
+    assert rooms(WIDE, sentence, index=0, total=2) == ["living"]
+    assert rooms(WIDE, sentence, index=1, total=2) == ["store"]
+
+
+# --- music ------------------------------------------------------------------
+
+def test_music_is_read_out_of_the_sentence():
+    """The title never comes from the model, for the same reason a message does not.
+
+    Hebrew reaches a tool argument as escape sequences, six exact characters
+    per letter, and the model gets them wrong. So the tool has no slot for a
+    title at all: the model is asked only for the kind of thing.
+    """
+    found = SLOT.extract_music("תנגן לי את אם ננעלו של עומר אדם")
+    assert (found.media_id, found.artist) == ("אם ננעלו", "עומר אדם")
+
+    found = SLOT.extract_music("שים לי את האלבום שבלול של כוורת")
+    assert (found.media_id, found.media_type, found.artist) == (
+        "שבלול", "album", "כוורת")
+
+    found = SLOT.extract_music("תנגן רדיו גלגלצ במטבח")
+    assert (found.media_id, found.media_type) == ("גלגלצ", "radio")
+
+    found = SLOT.extract_music("תנגן לי מוזיקה של שלמה ארצי")
+    assert (found.media_id, found.media_type) == ("שלמה ארצי", "artist")
+
+
+def test_a_request_that_names_nothing_is_not_a_search():
+    """None means resume, not search the library for the word "music"."""
+    for sentence in ("תנגן מוזיקה", "תנגן קצת מוזיקה בסלון",
+                     "תנגן את השיר הבא",          # transport control
+                     "תפעיל את השואב",            # a device, not a record
+                     "תדליק את האור בסלון"):
+        assert SLOT.extract_music(sentence) is None, sentence
+
+
+def test_the_room_is_not_part_of_the_search():
+    """Otherwise the library is asked for "Kaveret in the living room"."""
+    assert SLOT.extract_music("תנגן לי כוורת בסלון").media_id == "כוורת"
+
+
+def test_the_router_offers_the_music_tool_when_a_kind_is_named():
+    """A word for the kind of thing separates playing from resuming."""
+    for sentence in ("שים לי את האלבום שבלול", "תנגן רדיו גלגלצ",
+                     "תשמיע לי פלייליסט רגוע"):
+        assert ROUTER.select_tool_names(sentence)[0] == "music_play", sentence
+    assert "music_play" in ROUTER.select_tool_names("תנגן לי כוורת")
+    # "Stop the song" is transport control; the noun must not hijack it.
+    assert ROUTER.select_tool_names("תעצור את השיר")[0] == "media_pause"
+    assert "music_play" not in ROUTER.select_tool_names("תדליק את האור בסלון")

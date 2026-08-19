@@ -17,16 +17,90 @@ Every number below is measured, and the measurement is named.
      │
      ├─ 1. negation guard        "אל תדליק" → refuse, before anything runs
      ├─ 2. off-topic gate        "מה מזג האוויר בפריז" → refuse
-     ├─ 3. read-only gate        a question gets read-only tools, and only those
-     ├─ 4. tool router           ≤5 tools declared, chosen by Hebrew keywords
+     ├─ 3. clause split          one order per clause; the rest runs per clause
+     ├─ 4. read-only gate        a question gets read-only tools, and only those
+     ├─ 5. tool router           ≤5 tools declared, chosen by Hebrew keywords
      │
-     ├─ 5. the model             picks one tool and fills its numeric slots
+     ├─ 6. the model             picks one tool and fills its numeric slots
      │
-     ├─ 6. slot resolution       room, device, scene, message ← from the sentence
-     └─ 7. Home Assistant        the real service call
+     ├─ 7. slot resolution       room, device, scene, message, music ← from the sentence
+     └─ 8. Home Assistant        the real service call
 ```
 
-Steps 1–4 and 6 are ordinary Python. Step 5 is the only inference.
+Everything but step 6 is ordinary Python. Step 6 is the only inference, and
+it runs once per clause.
+
+---
+
+## Why the sentence is cut before the model sees it
+
+Asked for two orders at once, the model answers with one call. Measured on
+the 97 multi-order rows of the held-out set: **94 of 97** come back as a
+single call, for **0.0%** tool-set accuracy — usually the verb of one clause
+with the room of another.
+
+```
+gold  vacuum_start{} · lock_lock{office} · cover_close{parking}
+pred  vacuum_start{area: office}
+```
+
+It is not the grammar (asked directly, the engine returns two calls), not
+truncation (a three-call target peaks at 157 of 192 tokens), and not the
+context window (the same adapter exported at window 704 and at 160 gives
+byte-identical metrics). It is that 94% of the training targets contain
+exactly one call, so the prior to stop after the first is overwhelming.
+
+So the sentence is cut at a comma, at a joining phrase (`וגם`, `ואז`,
+`ואחר כך`), or at a word whose leading `ו` is glued to an action verb —
+Hebrew writes "and close" as one token, `וסגור`. A cut is kept **only if
+both sides contain an action verb**, which is the whole safety condition:
+
+| sentence | cut? | why |
+|---|---|---|
+| `תדליק את האור בסלון וסגור את התריסים` | yes | both sides have a verb |
+| `תדליק את האור בסלון ובמטבח` | no | `ובמטבח` is a room |
+| `תדליק את האור והמזגן בסלון` | no | `והמזגן` is a device |
+| `אה, סגור את האור` | no | a filler is not an order |
+| `מה המצב של האור בסלון ובמטבח` | no | interrogatives are not action verbs |
+
+On the same rows and the same weights: **0.0% → 75.3%** tool-set, 0.0% →
+42.3% exact. On 400 seeded rows of the whole test set every family scores
+identically except the multi-order one — the cut fires where it is meant to
+and nowhere else — and the overall numbers rise 63.5% → 66.8% tool-set and
+42.5% → 44.2% exact.
+
+The other shape is one order over several rooms — `תכבה את האור בסלון
+ובמטבח` — which stays one clause and targets both rooms. Rooms named in
+*overlapping* spans are not two rooms but two readings of one: a house with
+`חדר הורים` and `חדר ילדים` must not light the parents' room because the
+children's was asked for.
+
+---
+
+## Music
+
+`music_assistant.play_media` takes a search string and resolves it against
+the library [Music Assistant](https://www.music-assistant.io/) already
+indexes. So the split of labour is the same as everywhere else here:
+
+* the **model** supplies `media_type` — one of `track / album / artist /
+  playlist / radio`, evidenced by a word the speaker said;
+* the **sentence** supplies the title, the artist and the room;
+* **Music Assistant** does the lookup.
+
+```
+תנגן לי את אם ננעלו של עומר אדם   → media_id "אם ננעלו", artist "עומר אדם"
+שים לי את האלבום שבלול של כוורת   → media_id "שבלול", album, artist "כוורת"
+תנגן רדיו גלגלצ במטבח             → media_id "גלגלצ", radio, room stripped
+תנגן קצת מוזיקה בסלון             → nothing named: resume, do not search
+```
+
+The tool has no argument for what to play, deliberately — Hebrew reaches a
+tool argument as six-character escapes and the model gets them wrong, which
+is the same measurement that moved notification text out of the model. A
+residue made only of device nouns is not a title (`תפעיל את השואב` stays a
+vacuum), and a house with no Music Assistant falls back to
+`media_player.media_play` on the room's own speaker.
 
 ---
 
@@ -216,5 +290,10 @@ Everything above is one rule applied five times:
 > judgement.
 
 What is left for the model is: which of five verbs, and what number goes in the
-slot. That it does at 63.5% tool-set and 42.5% exact on unseen held-out rows —
+slot. That it does at 66.8% tool-set and 44.2% exact on unseen held-out rows —
 and the parts around it are at 98–100%.
+
+The rule is also why multi-order sentences went from 0% to 75% without
+retraining anything. Where a capability is missing, the first question is
+whether it is a judgement the model has to make, or a fact about the sentence
+that code can settle. Segmentation was the second kind.
