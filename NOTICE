@@ -1,8 +1,9 @@
 Needle Assist for Home Assistant (Hebrew)
 =========================================
 
-This repository bundles third-party work. Each item keeps the licence it was
-published under.
+The MIT licence in LICENSE covers this repository's own code. This repository
+also bundles third-party work, and each item keeps the licence it was published
+under.
 
 
 1. The model - custom_components/needle_assist/needle_he.cact
