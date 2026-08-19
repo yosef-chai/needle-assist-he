@@ -49,6 +49,7 @@ a verb this module can split on, and there is no second list to keep in step.
 
 from __future__ import annotations
 
+import re
 from typing import Final
 
 from .tool_router import FAMILY_VERBS, TOOL_HINTS, _fold
@@ -59,6 +60,23 @@ from .tool_router import FAMILY_VERBS, TOOL_HINTS, _fold
 MAX_CLAUSES: Final = 4
 
 _PUNCT: Final = ".,!?;:'\"״׳()[]-–—"
+
+# A speaker taking back the order they just gave. Israelis correct
+# themselves mid-sentence constantly, and the corpus has a family for it:
+# "תכבה את המנורה, לא לא, תעשה את המנורה" is one order, not two, and the
+# one that counts is the second.
+#
+# Cutting it in two turned the light off and then on again - 33 of the 74
+# correction rows of the held-out set were being split that way. Only one
+# row in the other 2,305 carries any of these words at all, and it is an
+# off-topic sentence whose answer is no call.
+#
+# Shared with `direction`, which has to leave the same sentences alone for
+# the same reason: the verb it would read is the one being retracted.
+CORRECTION: Final = re.compile(_fold("|".join((
+    r"\bבעצם\b", r"\bטעות\b", r"\bסליחה\b", r"\bלא לא\b", r"\bאה לא\b",
+    r"\bלא,", r"\bבמקום\b",
+))))
 
 # Phrases that join two orders. Stored folded and space-separated so a
 # two-word joiner can be matched by look-ahead.
@@ -114,6 +132,25 @@ def _has_verb(tokens: list[str]) -> bool:
     return any(_is_action_verb(t) for t in tokens)
 
 
+def after_a_correction(text: str) -> str:
+    """Whatever the speaker said after taking their order back.
+
+    The whole sentence when nothing was taken back, and also when what
+    follows the retraction has no verb in it: "תדליק את האור בסלון ובעצם
+    גם במטבח" is an afterthought rather than a correction, and dropping
+    its first half would drop the only verb in the sentence.
+    """
+    last = None
+    # _fold is a character-for-character translation, so an offset into the
+    # folded string is an offset into this one.
+    for match in CORRECTION.finditer(_fold(text)):
+        last = match
+    if last is None:
+        return text
+    rest = text[last.end():].strip(" ,.")
+    return rest if rest and _has_verb(rest.split()) else text
+
+
 def split_clauses(text: str, limit: int = MAX_CLAUSES) -> list[str]:
     """One clause per order, or the sentence unchanged if there is only one.
 
@@ -121,7 +158,11 @@ def split_clauses(text: str, limit: int = MAX_CLAUSES) -> list[str]:
     joining phrases are dropped and a leading ``ו`` is peeled off the verb it
     was glued to, because neither carries meaning for the router or for the
     slot resolver, and both would otherwise be the first thing the model reads.
+
+    An order the speaker took back is dropped first - see
+    :func:`after_a_correction`.
     """
+    text = after_a_correction(text)
     tokens = text.split()
     if len(tokens) < 4:            # too short to hold two orders
         return [text]

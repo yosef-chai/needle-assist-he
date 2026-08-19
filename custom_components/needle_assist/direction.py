@@ -30,7 +30,10 @@ measurement rather than by reading:
 * **Self-corrections.** "תכבה את המנורה, לא לא, תעשה את המנורה" says the wrong
   verb first and then fixes it. Sixteen of the eighteen disagreements were this
   shape. Taking the *last* verb instead of counting them was tried and is
-  worse - see ``_MEDIA`` below for why position cannot be trusted here.
+  worse, for the reason the third bullet gives: position cannot be trusted
+  when a hint list holds nouns as well as verbs. The pattern is
+  :data:`clause_split.CORRECTION`, shared with the module that has to cut
+  the same sentences differently for the same reason.
 * **Dimming.** ``עמעם`` sits in ``light_turn_off``'s hints, which is right for
   routing - a dim is a reduction - and wrong here: "תעמעם קצת פחות" is
   ``light_turn_on`` with a brightness argument, not an off.
@@ -42,9 +45,9 @@ measurement rather than by reading:
 
 from __future__ import annotations
 
-import re
 from typing import Final
 
+from .clause_split import CORRECTION
 from .tool_router import TOOL_HINTS, _fold, _hits, _tokens
 
 #: Tools that come in a pair whose direction a Hebrew verb settles. ``media``
@@ -75,13 +78,6 @@ VOCABULARY: Final[dict[str, list[str]]] = {
     for tool in OPPOSITE
 }
 
-# "no, actually", "my mistake", "sorry" - a speaker taking back the verb they
-# just used. The corpus calls these the `correction` family; every one of them
-# contains the wrong verb as well as the right one.
-_CORRECTION: Final = re.compile(_fold("|".join((
-    r"\bבעצם\b", r"\bטעות\b", r"\bסליחה\b", r"\bלא לא\b", r"\bלא,", r"\bבמקום\b",
-))))
-
 
 def settle(tool: str, text: str) -> str:
     """The tool the words point at, or ``tool`` unchanged.
@@ -93,7 +89,7 @@ def settle(tool: str, text: str) -> str:
     other = OPPOSITE.get(tool)
     if other is None or not text:
         return tool
-    if _CORRECTION.search(_fold(text)):
+    if CORRECTION.search(_fold(text)):
         return tool
     tokens = _tokens(text)
     mine = _hits(VOCABULARY[tool], tokens, text)

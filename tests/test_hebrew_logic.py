@@ -657,3 +657,37 @@ def test_every_name_addressed_tool_targets_a_real_domain():
     for tool, domain in CONST.NAME_ADDRESSED.items():
         assert tool in CONST.SERVICE_MAP, tool
         assert CONST.SERVICE_MAP[tool][0] == domain, tool
+
+
+@pytest.mark.parametrize("sentence,clauses", [
+    # Taking an order back is not giving two orders. Cutting these in two
+    # turned the light off and then on again - 33 of the 74 correction rows of
+    # the held-out set were being split that way.
+    ("תכבה את המנורה בחדר האוכל, לא לא, תעשה את המנורה בחדר האוכל",
+     ["תעשה את המנורה בחדר האוכל"]),
+    ("אה, תסגור אור בחדר העבודה, לא, בעצם תעשי אור בחדר העבודה",
+     ["תעשי אור בחדר העבודה"]),
+    ("נו תכבה לי את המנורה על הבלקון, טעות, פתחי את המנורה על הבלקון",
+     ["פתחי את המנורה על הבלקון"]),
+    ("תכבה לי את האור בחצר, אה לא פתחי את האור בחצר",
+     ["פתחי את האור בחצר"]),
+    # An afterthought is not a retraction: dropping the first half here would
+    # drop the only verb in the sentence, so the rule stands down.
+    ("תדליק את האור בסלון ובעצם גם במטבח",
+     ["תדליק את האור בסלון ובעצם גם במטבח"]),
+    # And two real orders are still two.
+    ("תכבה את האור בסלון וסגור את התריס במטבח",
+     ["תכבה את האור בסלון", "סגור את התריס במטבח"]),
+])
+def test_an_order_taken_back_is_not_a_second_order(sentence, clauses):
+    assert CLAUSE.split_clauses(sentence) == clauses
+
+
+def test_the_correction_pattern_is_shared_with_the_direction_guard():
+    """One definition, because both modules need the same sentences.
+
+    `clause_split` must not cut them and `direction` must not read a verb off
+    them, and for the same reason: the verb before the retraction is the one
+    the speaker withdrew.
+    """
+    assert DIRECTION.CORRECTION is CLAUSE.CORRECTION
