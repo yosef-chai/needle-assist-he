@@ -56,10 +56,27 @@ backwards is the same defect one level down:
     pred   climate_set_temperature{temperature_step: 4}   ...raised it 4 degrees
 
 That is an eight-degree error from a one-character one, and the model makes it
-often: the training corpus is 71% positive steps and the held-out set is 97%
+because the training corpus is 71% positive steps and the held-out set is 97%
 negative, so a model that learned "usually up" scores well on one and badly on
-the other. Wrong-sign predictions are the largest single group of failures in
-the whole evaluation.
+the other.
+
+It is not the common failure, and saying so would overstate this module.
+Counted over the dumped failures of three runs, on the calls whose gold carries
+a relative step and whose arguments are wrong:
+
+    the model emitted no step at all      86
+    the sign is backwards                 13
+    the sign is right, the size is not     0
+
+So the guard repairs 13 of those 99, and leaves the 86. Supplying the missing
+step was measured and rejected: the sentence reads the whole value correctly
+96.6% of the time, but 106 calls in the corpus carry an *absolute* value under
+a directional verb - "תוריד את המזגן בכניסה לבית לבערך 25" lowers it *to* 25 -
+so a rule that filled from the direction alone would invent a step where a
+target was meant. The 86 are also the benign failure: a `set_temperature` with
+no temperature is refused by Home Assistant, so the household is told the
+command failed and repeats it. A wrong sign is the other kind, and that is the
+one worth a rule.
 
 The sentence is not ambiguous, and it reads in three tiers, because Hebrew
 comparatives stack:
