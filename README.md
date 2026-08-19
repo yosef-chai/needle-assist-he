@@ -107,7 +107,7 @@
 | בקשות מוזיקה — שם השיר נקרא נכון מהמשפט | **83 מתוך 85** |
 | זיהוי החדר (בקוד, לא במודל) | **99.0%** |
 | זיהוי חדר במילים נרדפות שלא נראו באימון | **100%** |
-| ניתוב לכלי הנכון (רשימה מקוצרת) | 98.8% |
+| ניתוב לכלי הנכון (רשימה מקוצרת) | 99.1% |
 | שאלות שקיבלו כלים לקריאה בלבד, ולכן לא יכלו להפעיל כלום | 82.0% |
 | פקודות אמיתיות שסווגו בטעות כשאלה | **0 מתוך 15,709** |
 | סירוב נכון לאמירות מחוץ לתחום | 73.9% |
@@ -189,7 +189,7 @@ On 400 unseen held-out rows, and across all 18,806 generated rows:
 | music requests, title read correctly from the sentence | **83 of 85** |
 | room resolution (in code, not in the model) | **99.0%** |
 | room resolution, synonyms never seen in training | **100%** |
-| tool shortlist recall | 98.8% |
+| tool shortlist recall | 99.1% |
 | questions given read-only tools only, so they cannot actuate | 82.0% |
 | real commands wrongly classified as questions | **0 of 15,709** |
 | off-topic correctly refused | 73.9% |
