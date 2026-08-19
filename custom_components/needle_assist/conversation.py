@@ -24,11 +24,10 @@ from homeassistant.helpers import (
 )
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import clause_split, tool_router
+from . import clause_split, reply, tool_router
 from .const import (
     CONF_CONFIDENCE, CONF_MAX_TOKENS, CONF_REFUSE_GATE, DEFAULT_CONFIDENCE,
-    DEFAULT_MAX_TOKENS, DEFAULT_REFUSE_GATE, DOMAIN, SPEECH_FAILED,
-    SPEECH_NOTHING, SPEECH_NO_TARGET, SPEECH_OK,
+    DEFAULT_MAX_TOKENS, DEFAULT_REFUSE_GATE, DOMAIN, SPEECH_NOTHING,
 )
 from .executor import CallExecutor, CallOutcome
 
@@ -37,18 +36,6 @@ _LOGGER = logging.getLogger(__name__)
 # Stands in for the tool name on a clause the engine never got through, so
 # that a failure there is counted alongside the calls that did run.
 ENGINE: Final = "engine failure"
-
-# Hebrew makes the noun and the verb agree with the number, so a count
-# spliced into a sentence has to be spelled out to come out as Hebrew:
-# "1 פעולות נכשלו" is a machine talking. Four is where the table stops
-# because `clause_split.MAX_CLAUSES` is four; beyond that a digit reads
-# naturally anyway.
-_FAILURES: Final[dict[int, str]] = {
-    1: "פעולה אחת נכשלה",
-    2: "שתי פעולות נכשלו",
-    3: "שלוש פעולות נכשלו",
-    4: "ארבע פעולות נכשלו",
-}
 
 
 async def async_setup_entry(
@@ -205,39 +192,24 @@ class NeedleConversationEntity(conversation.ConversationEntity):
                 )
 
         # An empty call list is Needle's refusal for anything no tool serves.
-        # It is a valid answer, not a failure.
+        # It is a valid answer, not a failure. `reply.compose` says the same
+        # thing; returning here keeps the rest of this function honest about
+        # only ever handling calls that ran.
         if not outcomes:
             response.async_set_speech(SPEECH_NOTHING)
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id
             )
 
-        spoken = ". ".join(o.speech for o in outcomes if o.ok and o.speech)
-        succeeded = [o for o in outcomes if o.ok]
-        failed = [o for o in outcomes if not o.ok]
-
-        if succeeded and failed:
-            # Both halves get said. A sentence carrying four orders can
-            # have one of them fail while another announces what it is
-            # playing, and speaking only the success would leave the
-            # dropped order sounding like it ran.
-            counted = _FAILURES.get(
-                len(failed), f"{len(failed)} פעולות נכשלו")
-            partial = f"{SPEECH_OK} חלקית, {counted}"
-            response.async_set_speech(
-                f"{spoken}. {partial}" if spoken else partial)
-        elif succeeded:
-            response.async_set_speech(spoken or SPEECH_OK)
-        elif all(o.detail == "no matching entities" for o in failed):
+        answer = reply.compose(outcomes, engine_error)
+        if answer.error == reply.NO_TARGETS:
             response.async_set_error(
-                intent.IntentResponseErrorCode.NO_VALID_TARGETS, SPEECH_NO_TARGET
-            )
+                intent.IntentResponseErrorCode.NO_VALID_TARGETS, answer.speech)
+        elif answer.error:
+            response.async_set_error(
+                intent.IntentResponseErrorCode.FAILED_TO_HANDLE, answer.speech)
         else:
-            response.async_set_error(
-                intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
-                f"{SPEECH_FAILED}: {engine_error}" if engine_error
-                else SPEECH_FAILED,
-            )
+            response.async_set_speech(answer.speech)
 
         return conversation.ConversationResult(
             response=response, conversation_id=user_input.conversation_id

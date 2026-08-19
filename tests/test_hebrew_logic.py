@@ -20,6 +20,8 @@ TEXT = load("hebrew_text")
 ROUTER = load("tool_router")
 SLOT = load("slot_match")
 CLAUSE = load("clause_split")
+CONST = load("const")
+REPLY = load("reply")
 
 
 # --- invented installations -------------------------------------------------
@@ -394,3 +396,66 @@ def test_a_kind_word_protects_a_title_that_looks_vague():
     """"רגוע" is a mood and also the name of a playlist."""
     assert SLOT.extract_music("תשמיע פלייליסט רגוע").media_id == "רגוע"
     assert SLOT.extract_music("תשמיע לי משהו טוב") is None
+
+
+# --- what the assistant says back -------------------------------------------
+
+class Outcome:
+    """Stand-in for executor.CallOutcome, which needs Home Assistant."""
+
+    def __init__(self, ok, speech=None, detail=""):
+        self.ok, self.speech, self.detail = ok, speech, detail
+
+
+def test_nothing_to_do_is_an_answer_not_a_failure():
+    """An empty call list is Needle refusing, which is a valid outcome."""
+    assert REPLY.compose([]).error is None
+    assert REPLY.compose([]).speech == CONST.SPEECH_NOTHING
+
+
+def test_a_plain_success_confirms_and_a_speaking_one_speaks():
+    assert REPLY.compose([Outcome(True)]).speech == CONST.SPEECH_OK
+    assert REPLY.compose([Outcome(True, "מנגן שבלול")]).speech == "מנגן שבלול"
+    # Several orders, several confirmations, one sentence.
+    both = REPLY.compose([Outcome(True, "מנגן שבלול"), Outcome(True, "22 מעלות")])
+    assert both.speech == "מנגן שבלול. 22 מעלות"
+
+
+def test_a_partly_successful_sentence_says_so():
+    """Speaking only the success leaves a dropped order sounding like it ran."""
+    said = REPLY.compose([Outcome(True, "מנגן שבלול"), Outcome(False, detail="boom")])
+    assert said.error is None                      # something did happen
+    assert said.speech.startswith("מנגן שבלול. ")
+    assert "נכשלה" in said.speech
+    # With nothing to announce, the partial report stands on its own.
+    quiet = REPLY.compose([Outcome(True), Outcome(False, detail="boom")])
+    assert quiet.speech == CONST.SPEECH_OK + " חלקית, פעולה אחת נכשלה"
+
+
+def test_hebrew_counts_the_failures_the_way_hebrew_counts():
+    """"1 פעולות נכשלו" is a machine talking; the noun and verb agree here."""
+    assert REPLY.failures(1) == "פעולה אחת נכשלה"
+    assert REPLY.failures(2) == "שתי פעולות נכשלו"
+    assert REPLY.failures(4) == "ארבע פעולות נכשלו"
+    # Past the clause limit a digit reads naturally again.
+    assert REPLY.failures(7) == "7 פעולות נכשלו"
+
+
+def test_finding_nothing_is_a_different_error_from_going_wrong():
+    """Home Assistant has two codes and they mean different things.
+
+    "no lamp in the study" is the house not having one; anything else is the
+    integration failing, and only the second is worth putting internals into.
+    """
+    empty = REPLY.compose([Outcome(False, detail=REPLY.NO_TARGET)])
+    assert empty.error == REPLY.NO_TARGETS
+    assert empty.speech == CONST.SPEECH_NO_TARGET
+
+    broke = REPLY.compose([Outcome(False, detail="engine failure")], "bad export")
+    assert broke.error == REPLY.FAILED
+    assert broke.speech.endswith("bad export")
+
+    # One of each is not "nothing was there", so it reports the failure.
+    mixed = REPLY.compose([Outcome(False, detail=REPLY.NO_TARGET),
+                           Outcome(False, detail="engine failure")])
+    assert mixed.error == REPLY.FAILED
