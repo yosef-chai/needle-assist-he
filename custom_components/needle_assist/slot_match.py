@@ -234,7 +234,25 @@ _OF: Final = re.compile(r"(?:^|\s)של\s+")
 _DEVICE_NOUNS: Final = frozenset(
     _fold(noun) for family, nouns in FAMILY_NOUNS.items() if family != "media"
     for noun in nouns
-)
+) | frozenset(_fold(w) for w in (
+    # The media family is skipped above because its nouns are mostly the
+    # thing being played. These few are not: they are the equipment it is
+    # played on and the source it comes from, so a sentence that names one
+    # is saying where, not what. "תנגן את הרמקול" is not a record called
+    # "the speaker".
+    #
+    # Listed one by one rather than taken as "the media family minus the
+    # content words", because that wider rule swept up שקט and לילה טוב -
+    # a mute setting and a bedtime script, and also two playlists this
+    # corpus actually contains, which cost eleven of the eighty-five titles.
+    "רמקול", "רמקולים", "נגן", "עוצמה", "ווליום", "וליום",
+    "סאונד", "שאונד", "קול", "מקור", "ערוץ",
+    "ספוטיפיי", "יוטיוב", "אייראפליי", "בלוטות'",
+    # Half of a device name the router spells with one word: its table
+    # has "שואב", and a speaker who says "שואב האבק" leaves "האבק"
+    # behind, which was neither a device word nor a grammar one.
+    "אבק",
+))
 
 # Words that stand where a name would and are not one. Matched through a
 # PhraseIndex rather than a set so that speech-to-text damage still lands -
@@ -314,6 +332,8 @@ def extract_music(utterance: str) -> MusicRequest | None:
             media_type = "artist" if _OF.match(rest) or rest.startswith("של ") else None
 
     rest = _LEADING_ET.sub("", rest).strip()
+    # ``על`` opens where to play or what to set it to, never a name.
+    rest = _strip_on_phrase(rest)
     # The room is targeting, not part of the search. It has to go before the
     # ``של`` split, because a room can contain one: "בחדר של הילדים".
     rest = _strip_trailing_room(rest)
@@ -377,6 +397,27 @@ def _names_a_device(text: str) -> bool:
         word in _NOT_A_NAME or bool(_variants(word) & _DEVICE_NOUNS)
         for word in words
     )
+
+
+def _strip_on_phrase(text: str) -> str:
+    """Drop a trailing ``על`` phrase: it is a target or a value, not a name.
+
+    "תנגן את פינק פלויד על המרפסת" plays Pink Floyd on the balcony, and "שים
+    את העוצמה על שישים אחוז" is a volume. Hebrew's ``על`` opens neither a
+    title nor an artist here - except when nothing comes before it, which is
+    where "שיר על אהבה" lives: the kind word has already been taken off the
+    front by then, so its ``על`` is first and the phrase survives whole.
+
+    Runs before the room strip rather than instead of it, because what is
+    left can still end in a room: "העוצמה בחדר שינה על שישים אחוז".
+
+    :func:`_names_a_device` does the same cut for its own purposes and keeps
+    doing it: it is also reached from callers that never came through here.
+    """
+    words = text.split()
+    if "על" in words and words.index("על") > 0:
+        return " ".join(words[:words.index("על")])
+    return text
 
 
 def _strip_trailing_room(text: str) -> str:

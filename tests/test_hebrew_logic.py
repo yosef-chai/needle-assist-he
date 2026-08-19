@@ -519,3 +519,24 @@ def test_a_vague_request_reaches_audio_without_unlocking_the_gate():
     assert "media_play" in ROUTER.select_tool_names("תפעיל לי משהו בסלון")
     assert ROUTER.looks_off_topic("תספר לי משהו על הפירמידות")
     assert ROUTER.looks_off_topic("ספר לי משהו מעניין")
+
+
+@pytest.mark.parametrize("sentence,media_id", [
+    # על says where to play it...
+    ("תנגן את פינק פלויד על המרפסת", "פינק פלויד"),
+    # ...or what to set it to, and neither is part of the name.
+    ("שים את העוצמה בחדר שינה על שישים אחוז", None),
+    ("שים את שואב האבק על מצב שקט", None),
+    # A speaker, a volume and a source are where the music comes out, not
+    # what comes out of them.
+    ("תנגן את הרמקול על הדשא", None),
+    ("שים ספוטיפיי בחדר האורחים", None),
+    ("תשים את הקול במוסך על 15 אחוז", None),
+    # ...but a playlist really called שקט survives all of it, which is why the
+    # equipment words are listed one by one instead of taken as a family.
+    ("נגן את הפלייליסט שקט", "שקט"),
+    ("הפעל את רשימת ההשמעה לילה טוב", "לילה טוב"),
+])
+def test_where_to_play_it_is_not_what_to_play(sentence, media_id):
+    found = SLOT.extract_music(sentence)
+    assert (found.media_id if found else None) == media_id, sentence

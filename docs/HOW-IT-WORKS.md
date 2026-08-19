@@ -229,7 +229,8 @@ So a keyword scorer picks at most five tools and the head never runs. Device
 **nouns** weigh triple: Hebrew imperatives are shared across domains (תפתח opens
 a blind, unlocks a door, and colloquially turns on a light), so the noun decides
 the domain and the verb only breaks ties. Recall @5 over the whole corpus:
-**98.5%**.
+**99.1%**, measured the way the integration runs it - one shortlist per
+clause. On the whole sentence in one piece it is 98.5%.
 
 ---
 
