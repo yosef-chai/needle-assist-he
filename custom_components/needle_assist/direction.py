@@ -22,12 +22,13 @@ belongs to one of the guarded pairs:
     the words disagree with gold     0      0.00%
     the words say nothing          205     13.3%
 
-Reading the whole sentence instead costs four of these and is the wrong
-measurement anyway: "תעשי את התאורה ואז תכבי אור בסלון" is two orders, and the
-second one's verb is not evidence about the first.
-
 Zero. A signal that is never wrong when it speaks is a signal that can overrule
 a model which is wrong one time in eight.
+
+Per clause is not a kinder measurement, it is the right one: reading whole
+sentences reports four disagreements which are not disagreements. "תעשי את
+התאורה ואז תכבי אור בסלון" is two orders, and the second one's verb says
+nothing about the first.
 
 The same mechanism settles two pairs that are not directions at all, and they
 are here because they are the same question - which of two tools inside one
