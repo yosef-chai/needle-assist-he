@@ -29,7 +29,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
-from . import slot_match, tool_router
+from . import direction, slot_match, tool_router
 from .clause_split import MAX_CLAUSES
 from .const import (
     CONF_MUSIC_PLAYER, CONF_WEIGHTS, DOMAIN, MUSIC_INTEGRATION,
@@ -80,5 +80,10 @@ async def async_get_config_entry_diagnostics(
             "room_weight": tool_router.ROOM_WEIGHT,
             "max_clauses": MAX_CLAUSES,
             "families": sorted(tool_router.FAMILY_TOOLS),
+            # Which corrections the sentence is allowed to make to the model.
+            # A household reporting "it unlocked instead of locking" wants to
+            # know whether the pair was guarded at all.
+            "guarded_pairs": [list(pair) for pair in direction.PAIRS],
+            "guarded_steps": sorted(direction.RELATIVE),
         },
     }
