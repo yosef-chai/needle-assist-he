@@ -216,6 +216,10 @@ def test_every_routed_tool_exists_in_the_catalogue():
     routed = {name for tools in ROUTER.FAMILY_TOOLS.values() for name in tools}
     assert routed <= catalogue, routed - catalogue
     assert set(ROUTER.FALLBACK) <= catalogue
+    # Hints too. A hint list under a name no tool has is not a typo that shows
+    # up anywhere: the words simply never rank the tool they were written for,
+    # and `direction` silently stops guarding the pair they belong to.
+    assert set(ROUTER.TOOL_HINTS) <= catalogue, set(ROUTER.TOOL_HINTS) - catalogue
 
 
 def test_the_model_is_bundled():
@@ -782,3 +786,19 @@ def test_every_relative_argument_is_guarded():
     ship with an unguarded sign."""
     assert DIRECTION.RELATIVE == {
         "temperature_step", "brightness_step_pct", "volume_step_pct"}
+
+
+@pytest.mark.parametrize("sentence,settled", [
+    # The infinitive is how a Hebrew speaker asks politely, and it was the
+    # last shape the guard could not read: every lock inversion left in the
+    # shipped evaluation was one of these.
+    ("אתה יכול לנעול את הדלת בחדר הילדים", "lock_lock"),
+    ("תוכל לנעול את המנעול בחדר העבודה", "lock_lock"),
+    ("אפשר לסגור את התריס בסלון", "cover_close"),
+    ("אתה יכול לכבות את האור במטבח", "light_turn_off"),
+    ("אפשר להדליק את המאוורר בחדר", "fan_turn_on"),
+])
+def test_the_polite_infinitive_is_still_an_order(sentence, settled):
+    opposite = DIRECTION.OPPOSITE[settled]
+    assert DIRECTION.settle(opposite, sentence) == settled
+    assert DIRECTION.settle(settled, sentence) == settled

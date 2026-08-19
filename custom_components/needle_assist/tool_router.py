@@ -294,6 +294,43 @@ TOOL_HINTS: Final[dict[str, list[str]]] = {
     "notify_send": ["הודעה", "תשלח", "שלח", "התראה", "הודע", "תודיע", "תשלחי", "שלחי", "הודיעי", "תודיעי", "תעדכן", "תעדכני", "כולם"],
 }
 
+# The infinitive, which is how a Hebrew speaker asks politely: "אתה יכול
+# לנעול את הדלת" is the same order as "נעל את הדלת" and was the last shape the
+# direction guard could not read - every lock inversion left in the shipped
+# evaluation was one of these. Appended rather than written inline so that the
+# lists above stay readable as what they are, one imperative per line.
+for _tool, _forms in {
+    "light_turn_on": ["להדליק", "להאיר", "לפתוח"],
+    "light_turn_off": ["לכבות", "לסגור", "לעמעם"],
+    "climate_turn_off": ["לכבות", "לסגור", "להפסיק"],
+    "climate_set_temperature": ["לחמם", "לקרר", "לשים", "להגדיר"],
+    "lock_lock": ["לנעול", "לסגור"],
+    "lock_unlock": ["לפתוח", "לשחרר"],
+    "cover_open": ["לפתוח", "להרים", "להעלות"],
+    "cover_close": ["לסגור", "להוריד"],
+    "switch_turn_on": ["להדליק", "להפעיל"],
+    "switch_turn_off": ["לכבות", "לסגור"],
+    "fan_turn_on": ["להדליק", "להפעיל"],
+    "fan_turn_off": ["לכבות", "לסגור"],
+    "camera_turn_on": ["להדליק", "להפעיל"],
+    "camera_turn_off": ["לכבות"],
+    "automation_turn_on": ["להפעיל", "להדליק", "לאפשר"],
+    "automation_turn_off": ["לבטל", "לכבות", "להשבית"],
+    "input_boolean_turn_on": ["להפעיל", "להדליק"],
+    "input_boolean_turn_off": ["לכבות", "לבטל"],
+    "vacuum_start": ["לשאוב", "לנקות", "להתחיל", "להפעיל"],
+    "vacuum_pause": ["לעצור", "להפסיק", "להשהות"],
+    "vacuum_return_to_base": ["לחזור", "להחזיר"],
+    "media_play": ["לנגן", "להשמיע", "להמשיך"],
+    "media_pause": ["לעצור", "להפסיק", "להשהות"],
+    "music_play": ["לנגן", "להשמיע", "לשמוע"],
+    "scene_activate": ["להפעיל", "להדליק"],
+    "script_run": ["להריץ", "להפעיל"],
+    "timer_start": ["לכוון", "להתחיל"],
+    "timer_cancel": ["לבטל", "לעצור"],
+}.items():
+    TOOL_HINTS.setdefault(_tool, []).extend(_forms)
+
 # When nothing matches - an unrelated utterance, or one whose vocabulary this
 # table does not cover - offer a spread across the most common domains rather
 # than nothing. The model can still return an empty call list, which is the
