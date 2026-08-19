@@ -64,11 +64,13 @@ both sides contain an action verb**, which is the whole safety condition:
 | `אה, סגור את האור` | no | a filler is not an order |
 | `מה המצב של האור בסלון ובמטבח` | no | interrogatives are not action verbs |
 
-On the same rows and the same weights: **0.0% → 75.3%** tool-set, 0.0% →
-42.3% exact. On 400 seeded rows of the whole test set every family scores
-identically except the multi-order one — the cut fires where it is meant to
-and nowhere else — and the overall numbers rise 63.5% → 66.8% tool-set and
-42.5% → 44.2% exact.
+On the same rows and the same weights, over all 192 multi-order rows of the
+held-out set: **0.0% → 95.3%** tool-set, **0.0% → 91.7%** exact. Zero is not a
+rounding — a sentence carrying two orders gets one call out of the model every
+time, so the tool *set* can never match.
+
+On the whole test set every family scores the same with the cut as without it
+except the multi-order one — it fires where it is meant to and nowhere else.
 
 The other shape is one order over several rooms — `תכבה את האור בסלון
 ובמטבח` — which stays one clause and targets both rooms. Rooms named in

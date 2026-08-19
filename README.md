@@ -107,6 +107,8 @@
 | משפט עם כמה פקודות — כלים וארגומנטים | **91.7%** |
 | תיקון עצמי באמצע משפט ("לא לא, תעשה...") | **100%** |
 | "בכל הבית" | **98.7%** |
+| בקשות מוזיקה — הכלי הנכון | **71.5%** |
+| בקשות מוזיקה — הכלי, השם והסוג | **69.1%** |
 | נעילה ופתיחה — הכיוון הנכון | **95.9%** |
 | הכיוון נקרא מהמילים: מסכים / סותר את התווית | **1337 / 0** |
 | הסימן של שינוי יחסי: מסכים / סותר | **1222 / 1** |
@@ -199,6 +201,8 @@ On **all 2,379 rows** of the held-out test set, out of 22,520 generated:
 | multi-order sentences, tools and arguments | **91.7%** |
 | mid-sentence self-correction ("no no, do...") | **100%** |
 | "the whole house" | **98.7%** |
+| music requests, correct tool | **71.5%** |
+| music requests, tool, title and kind | **69.1%** |
 | lock and unlock, the right direction | **95.9%** |
 | direction read from the words: agrees / contradicts the label | **1337 / 0** |
 | sign of a relative change: agrees / contradicts | **1222 / 1** |
