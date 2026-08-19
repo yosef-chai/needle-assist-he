@@ -23,8 +23,9 @@ Every number below is measured, and the measurement is named.
      │
      ├─ 6. the model             picks one tool and fills its numeric slots
      │
-     ├─ 7. slot resolution       room, device, scene, message, music ← from the sentence
-     └─ 8. Home Assistant        the real service call
+     ├─ 7. direction guard       lock or unlock, and which way a step points
+     ├─ 8. slot resolution       room, device, scene, message, music ← from the sentence
+     └─ 9. Home Assistant        the real service call
 ```
 
 Everything but step 6 is ordinary Python. Step 6 is the only inference, and
@@ -101,6 +102,70 @@ is the same measurement that moved notification text out of the model. A
 residue made only of device nouns is not a title (`תפעיל את השואב` stays a
 vacuum), and a house with no Music Assistant falls back to
 `media_player.media_play` on the room's own speaker.
+
+---
+
+## Why the verb overrules the model
+
+Every model trained for this project inverts a command sometimes, and the
+worst version of that is the worst thing a home assistant can do:
+
+    נעל את הדלת בחדר ההורים          lock the bedroom door
+    lock_unlock{area: bedroom}       ...unlocked it
+
+The Hebrew verb settles it. `נעל` is lock and `פתח` is unlock, `תדליק` is on
+and `תכבה` is off, and when the words and the model disagree the words win.
+Measured against the labels over all 2,379 held-out rows, on the calls whose
+tool belongs to one of the ten guarded pairs:
+
+| | | |
+|---|---:|---:|
+| the words agree with the label | 1337 | 86.7% |
+| the words disagree | **0** | 0.00% |
+| the words say nothing | 205 | 13.3% |
+
+Zero. A signal that is never wrong when it speaks can overrule a model that is
+wrong one time in eight — and the correction is deliberately narrow: it never
+changes which **domain** the model chose, only which of two tools inside it.
+"תפעיל את השואב" is answered by the vacuum and never reaches the light pair.
+
+Three things had to be excluded, and the measurement found each one:
+
+* **A retraction is not an order.** "תכבה את המנורה, לא לא, תעשה את המנורה"
+  says the wrong verb first and fixes it. The verb before the correction is
+  the one the speaker withdrew, so the guard stands down — and the clause
+  splitter stands down on the same sentences, or the light would be switched
+  off and then on again.
+* **A dim is a brightness, not an off.** `עמעם` belongs under `light_turn_off`
+  for routing, because a dim is a reduction, and does not belong here.
+* **`נגן` is both "play!" and "the player".** "תעצור את הנגן" carries a play
+  hint and a pause verb, and no amount of counting separates them. Music that
+  keeps playing is not a door that opens, so play and pause are left alone.
+
+### Which way the number points
+
+Three arguments are a change rather than a value — the temperature step, the
+brightness step and the volume step — and each is added to what the device
+currently reads. Their sign is a direction, so getting it backwards is the
+same defect one level down:
+
+    בסלון הגדול חם מדי, תנמיך משמעותית          it is too hot, lower it a lot
+    climate_set_temperature{temperature_step: 4}  ...raised it four degrees
+
+Eight degrees wrong, from one character. The sentence is not ambiguous, and it
+reads in three tiers because Hebrew comparatives stack: **the verb** first
+(`תנמיך` down, `תגביר` up), then **the adjective** (`חלש` quiet, `חזק` loud),
+and only then the bare **`פחות` / `יותר`**. The order carries the whole thing —
+"יותר חלש" is *more quiet*, not more, and reading the comparative first gets
+all 32 of those backwards.
+
+Measured the same way: **1222 agree, 1 disagrees, 12 say nothing.** The one is
+a sentence where the corpus's simulated speech noise corrupted the direction
+word itself.
+
+Only the sign is taken. The size — `קצת` one step, `משמעותית` four — was
+measured too and reaches 96.6%, and that is not zero: two degrees short is not
+eight degrees backwards, and a step too small is one the speaker repeats.
 
 ---
 
