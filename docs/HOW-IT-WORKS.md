@@ -86,9 +86,11 @@ children's was asked for.
 the library [Music Assistant](https://www.music-assistant.io/) already
 indexes. So the split of labour is the same as everywhere else here:
 
-* the **model** supplies `media_type` — one of `track / album / artist /
-  playlist / radio`, evidenced by a word the speaker said;
-* the **sentence** supplies the title, the artist and the room;
+* the **sentence** supplies the title, the artist, the room, and the
+  `media_type` — one of `track / album / artist / playlist / radio`, read off
+  the word the speaker actually said (`האלבום`, `פלייליסט`, `רדיו`). The
+  model's own answer is the fallback, used only when the sentence named no
+  kind;
 * **Music Assistant** does the lookup.
 
 ```
@@ -104,6 +106,26 @@ is the same measurement that moved notification text out of the model. A
 residue made only of device nouns is not a title (`תפעיל את השואב` stays a
 vacuum), and a house with no Music Assistant falls back to
 `media_player.media_play` on the room's own speaker.
+
+### When the sentence overrules the tool
+
+A model that picks the wrong audio tool is corrected the same way everything
+else here is, in two strengths, because they carry different risks:
+
+| the model said | what the sentence must show | why |
+|---|---|---|
+| `media_play` — *resume* | any title | only the "what" is still in question |
+| some other media tool | the **kind** as well, and no number | the verb is being overruled too |
+
+"ערבבי את התקליט סיפורי פוגי" — *shuffle the record* — was being answered with
+`media_set_volume`, and the record's name was sitting in the sentence the whole
+time. "שים את השיר על שישים" is not: the number makes it a volume, and it says
+so.
+
+Measured over the whole corpus, on the media rows where the sentence names a
+kind and a title and no number: **661 of 663 are a play.** The two that are not
+are a speech-to-text artifact that glues `ו` to a room name, and the narrower
+rule mishandles them already.
 
 ---
 
