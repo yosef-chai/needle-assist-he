@@ -827,3 +827,11 @@ def test_the_state_words_stay_in_the_router():
     there would send "בסלון חם מדי, תנמיך" to no family at all."""
     assert CLAUSE.NOT_ORDERS & CLAUSE.ACTION_VERBS == frozenset()
     assert ROUTER.score_families("בסלון חם מדי, תנמיך משמעותית")[0][0] == "climate"
+
+
+def test_every_excluded_state_word_is_one_the_router_holds():
+    """A word the router never had, excluded from the verbs, is fiction
+    dressed as a rule: it changes nothing and reads as though it does."""
+    known = {CLAUSE._fold(h) for hints in ROUTER.TOOL_HINTS.values() for h in hints}
+    known |= {CLAUSE._fold(v) for verbs in ROUTER.FAMILY_VERBS.values() for v in verbs}
+    assert CLAUSE.NOT_ORDERS <= known, CLAUSE.NOT_ORDERS - known
