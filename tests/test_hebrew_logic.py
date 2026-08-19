@@ -23,6 +23,7 @@ SLOT = load("slot_match")
 CLAUSE = load("clause_split")
 CONST = load("const")
 REPLY = load("reply")
+DIRECTION = load("direction")
 
 
 # --- invented installations -------------------------------------------------
@@ -560,3 +561,65 @@ def test_naming_a_room_says_the_sentence_is_about_the_house():
     assert ROUTER.looks_off_topic("תספר לי משהו על הפירמידות")
     assert ROUTER.looks_off_topic("הגינה של השכנים מוזנחת")
     assert ROUTER.looks_off_topic("לאיזה מוסך כדאי לקחת את האוטו")
+
+
+# --- which way round --------------------------------------------------------
+
+@pytest.mark.parametrize("said,sentence,settled", [
+    # The worst thing a home assistant can do, and the reason this exists: the
+    # shipped model answered 45 of these with lock_unlock.
+    ("lock_unlock", "נעל את הדלת בחדר ההורים", "lock_lock"),
+    ("lock_unlock", "תנעל לי את המנעול בכניסה", "lock_lock"),
+    ("lock_lock", "תפתח את המנעול במטבח", "lock_unlock"),
+    ("lock_lock", "תשחרר את הנעילה בגינה", "lock_unlock"),
+    # ...and the rest of the pairs.
+    ("cover_close", "תפתח את התריס בסלון", "cover_open"),
+    ("cover_open", "תוריד את הווילון בחדר שינה", "cover_close"),
+    ("light_turn_off", "תדליק את האור במטבח", "light_turn_on"),
+    ("light_turn_on", "תכבה את המנורה בסלון", "light_turn_off"),
+    ("switch_turn_off", "תדליק את הדוד במקלחת", "switch_turn_on"),
+    ("camera_turn_on", "תכבי את המצלמה בחניון", "camera_turn_off"),
+    # A tool with no opposite is returned untouched.
+    ("vacuum_start", "תפעיל את השואב", "vacuum_start"),
+    ("get_state", "מה המצב של האור בסלון", "get_state"),
+])
+def test_the_verb_decides_which_way_round(said, sentence, settled):
+    assert DIRECTION.settle(said, sentence) == settled
+
+
+def test_a_speaker_taking_a_verb_back_is_left_alone():
+    """"תכבה את המנורה, לא לא, תעשה את המנורה" says the wrong verb first.
+
+    Sixteen of the eighteen disagreements with gold were this shape, and every
+    one of them is a light the speaker wanted *on*. The correction markers are
+    what the corpus's own `correction` family is built from.
+    """
+    sentence = "תכבה את המנורה בחדר האוכל, לא לא, תעשה את המנורה בחדר האוכל"
+    assert DIRECTION.settle("light_turn_on", sentence) == "light_turn_on"
+    assert DIRECTION.settle("light_turn_off", sentence) == "light_turn_off"
+
+
+def test_silence_leaves_the_model_alone():
+    """No direction verb, no correction. The common case and the safe one."""
+    assert DIRECTION.settle("cover_open", "את התריס בסלון בבקשה") == "cover_open"
+    assert DIRECTION.settle("cover_close", "את התריס בסלון בבקשה") == "cover_close"
+
+
+def test_dimming_is_a_brightness_and_not_an_off():
+    """עמעם sits in light_turn_off's routing hints, which is right there.
+
+    "תעמעם קצת פחות" is light_turn_on carrying a brightness argument, so the
+    guard does not read that word as a direction.
+    """
+    assert DIRECTION.settle(
+        "light_turn_on", "תעמעם קצת פחות את הנורה בחדר הביטחון") == "light_turn_on"
+
+
+def test_play_and_pause_are_deliberately_not_guarded():
+    """נגן is both "play!" and "the player", so no counting separates them.
+
+    "תעצור את הנגן" contains a pause verb and a play hint. Music that keeps
+    playing is not a door that opens, so the pair is left out entirely.
+    """
+    assert "media_play" not in DIRECTION.OPPOSITE
+    assert DIRECTION.settle("media_play", "תעצור את הנגן בסלון") == "media_play"

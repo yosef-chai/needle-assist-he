@@ -51,7 +51,7 @@ from homeassistant.helpers import (
     intent,
 )
 
-from . import slot_match, tool_router
+from . import direction, slot_match, tool_router
 from .const import (
     CONF_MUSIC_PLAYER, NON_SERVICE_ARGS, QUERY_TOOLS, SERVICE_MAP, TOOL_DOMAIN,
     WEATHER_STATES_HE,
@@ -293,6 +293,15 @@ class CallExecutor:
         """
         tool = call.get("name", "")
         args = dict(call.get("arguments") or {})
+
+        # Lock or unlock, open or close, on or off. The Hebrew verb settles
+        # it and the model does not always agree with the verb - see
+        # `direction`, where the signal is measured at 802 right and 0 wrong
+        # against gold. Corrected before anything else, because everything
+        # below reads `tool`.
+        if utterance and (settled := direction.settle(tool, utterance)) != tool:
+            _LOGGER.debug("the sentence says %s, not %s", settled, tool)
+            tool = settled
 
         if tool in QUERY_TOOLS:
             return await self._answer_query(tool, args, device_id, utterance,
