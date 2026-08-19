@@ -16,7 +16,7 @@ nothing catches.
 Measured on the Hebrew test set: **12% of queries** (18/150) died this way.
 
 The fix is to decode with ``errors="replace"``. The damaged bytes are confined
-to ``reasoning``, which is free text nobody acts on — ``function_calls`` are
+to ``reasoning``, which is free text nobody acts on - ``function_calls`` are
 grammar-constrained and structurally intact. So one U+FFFD in a field we
 discard is the whole cost, versus losing the entire response.
 

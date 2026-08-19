@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """One Hebrew sentence in, whatever the house does out.
 
 The model is replaced by a stub that returns the tool calls a real run
@@ -15,7 +14,8 @@ import pytest
 from homeassistant.components import conversation
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Context, HomeAssistant, ServiceCall
-from homeassistant.helpers import area_registry as ar, entity_registry as er
+from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import async_mock_service
 
 from custom_components.needle_assist.const import SPEECH_NOTHING

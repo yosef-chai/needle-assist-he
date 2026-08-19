@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Fixtures for the tests that need a running Home Assistant.
 
 Everything in this directory boots a real ``hass``. The Hebrew logic suite one

@@ -52,7 +52,10 @@ _MARKS: Final = re.compile("[֑-ֽֿ-ׇ]")
 _PUNCT: Final = str.maketrans({
     '"': "", "'": "", "׳": "", "״": "",   # geresh, gershayim
     "‘": "", "’": "", "“": "", "”": "",
-    "-": " ", "–": " ", "_": " ", ",": " ", ".": " ", "!": " ", "?": " ",
+    # The two long dashes are spelled as escapes: they are the pair a
+    # find-and-replace over prose reaches for, and they are data here.
+    "-": " ", "\u2013": " ", "\u2014": " ", "_": " ",
+    ",": " ", ".": " ", "!": " ", "?": " ",
 })
 
 # The particles Hebrew glues to the front of a noun. Stacking is real and

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Playing something by name, answering questions, and naming a scene.
 
 Music is the part of the integration that has to work in three different
@@ -12,13 +11,17 @@ from typing import Any
 
 import pytest
 from homeassistant.core import Context, HomeAssistant, ServiceCall
-from homeassistant.helpers import area_registry as ar, entity_registry as er
+from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import (
-    MockConfigEntry, async_mock_service,
+    MockConfigEntry,
+    async_mock_service,
 )
 
 from custom_components.needle_assist.const import (
-    CONF_MUSIC_PLAYER, DOMAIN, MUSIC_INTEGRATION,
+    CONF_MUSIC_PLAYER,
+    DOMAIN,
+    MUSIC_INTEGRATION,
 )
 from custom_components.needle_assist.executor import CallExecutor
 

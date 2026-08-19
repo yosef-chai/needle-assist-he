@@ -112,6 +112,56 @@ async def async_unload_entry(hass: HomeAssistant, entry: NeedleConfigEntry) -> b
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
+async def async_remove_entry(hass: HomeAssistant, entry: NeedleConfigEntry) -> None:
+    """Take everything this integration created away with it.
+
+    Home Assistant deletes the entry and clears the device and entity
+    registries by itself. Two things sit outside that and would otherwise
+    survive an uninstall:
+
+    * the engine downloaded on first setup, under
+      ``<config>/needle_assist_engine/`` - about 13 MB per engine version, in
+      a directory a household has no reason to know the name of;
+    * the ``weights_file_missing`` repair, which is keyed by domain rather
+      than by entry. Left behind it is an alert naming a model file, raised by
+      an integration that is no longer installed and offering a Reconfigure
+      button that no longer leads anywhere.
+
+    Being wrong here costs nothing: the engine is a public download that comes
+    back on the next install, and the model ships inside the component's own
+    folder, which HACS removes. Nothing the household put there is touched -
+    a ``.cact`` of your own lives wherever you put it, and this only ever
+    removes the one directory it created.
+
+    Ordering is worth knowing. Home Assistant can only call this while the
+    integration is still on disk, so deleting the entry first is what makes
+    the cleanup run. Uninstalling from HACS first removes the code, and then
+    there is nothing left to ask - the entry is dropped as an orphan and the
+    engine directory stays. The README says so, in both languages.
+    """
+    ir.async_delete_issue(hass, DOMAIN, ISSUE_WEIGHTS_MISSING)
+    engine_lib.unbind_library()
+
+    config_path = hass.config.path()
+    try:
+        removed = await hass.async_add_executor_job(
+            engine_lib.remove_downloads, config_path
+        )
+    except OSError as err:
+        # The entry is already gone; raising here would only turn a tidy-up
+        # into a traceback in the log. Name the directory instead, so whoever
+        # reads the warning can finish the job in one command.
+        _LOGGER.warning(
+            "could not remove %s: %s. It holds nothing but the downloaded "
+            "engine and is safe to delete by hand",
+            engine_lib.engine_root(config_path), err,
+        )
+        return
+
+    if removed:
+        _LOGGER.info("removed the downloaded Needle engine at %s", removed)
+
+
 async def _async_reload(hass: HomeAssistant, entry: NeedleConfigEntry) -> None:
     """Reload when options change - the engine binds its toolset at init."""
     await hass.config_entries.async_reload(entry.entry_id)

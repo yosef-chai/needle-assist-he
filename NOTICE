@@ -5,7 +5,7 @@ This repository bundles third-party work. Each item keeps the licence it was
 published under.
 
 
-1. The model — custom_components/needle_assist/needle_he.cact
+1. The model - custom_components/needle_assist/needle_he.cact
 ------------------------------------------------------------
 
 A LoRA fine-tune of Needle 2, merged and exported at 4-bit.
@@ -23,7 +23,7 @@ this notice of modification travel with them. A full copy of the licence text
 is at LICENSES/Apache-2.0.txt.
 
 
-2. The engine — custom_components/needle_assist/needle_engine/
+2. The engine - custom_components/needle_assist/needle_engine/
 --------------------------------------------------------------
 
 Four files copied byte-for-byte from `cactus-needle` 2.0.5, so that the

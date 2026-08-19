@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Every path through the config, reconfigure and options flows.
 
 The quality scale asks for full coverage of the config flow specifically, and
@@ -14,13 +13,18 @@ from unittest.mock import patch
 
 import pytest
 from homeassistant.config_entries import (
-    SOURCE_RECONFIGURE, SOURCE_USER, ConfigEntry,
+    SOURCE_RECONFIGURE,
+    SOURCE_USER,
+    ConfigEntry,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 
 from custom_components.needle_assist.const import (
-    CONF_MAX_TOKENS, CONF_MUSIC_PLAYER, CONF_WEIGHTS, DOMAIN,
+    CONF_MAX_TOKENS,
+    CONF_MUSIC_PLAYER,
+    CONF_WEIGHTS,
+    DOMAIN,
 )
 
 BUNDLED = "custom_components.needle_assist.config_flow.BUNDLED_WEIGHTS"

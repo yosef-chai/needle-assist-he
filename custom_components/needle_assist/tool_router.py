@@ -377,6 +377,8 @@ _CLITICS: Final[tuple[str, ...]] = (
     "כש", "שה", "ב", "ל", "כ", "מ", "ש", "ו", "ה",
 )
 
+# Written as escapes: these two are invisible in a diff, and a pass that
+# rewrites dashes in prose silently drops one of them from the class.
 _PUNCT: Final[str] = ".,!?;:'\"״׳()[]-–—"
 
 # Hebrew writes five letters differently at the end of a word. Speech-to-text

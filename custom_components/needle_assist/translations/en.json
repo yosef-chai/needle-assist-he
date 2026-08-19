@@ -13,7 +13,7 @@
       },
       "reconfigure": {
         "title": "Needle Assist (Hebrew)",
-        "description": "Leave this empty to use the model that ships with the integration — that is the one every update keeps current. Fill it in only to run your own fine-tuned .cact file instead.",
+        "description": "Leave this empty to use the model that ships with the integration - that is the one every update keeps current. Fill it in only to run your own fine-tuned .cact file instead.",
         "data": {
           "weights_path": "Path to your own .cact file (optional)"
         },
@@ -23,7 +23,7 @@
       }
     },
     "error": {
-      "weights_not_found": "No file at that path. Home Assistant must be able to read it — inside a container, use a path under /config.",
+      "weights_not_found": "No file at that path. Home Assistant must be able to read it - inside a container, use a path under /config.",
       "weights_not_cact": "Needs a .cact file produced by `needle build`, not a .pkl checkpoint.",
       "weights_missing": "The bundled model is not present in this installation, so a path is required. Reinstall the integration, or point this at a .cact file yourself."
     },

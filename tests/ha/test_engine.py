@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """The plumbing between Home Assistant and a native library.
 
 No real engine is loaded anywhere here: the native library, the download and

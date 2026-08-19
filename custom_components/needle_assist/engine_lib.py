@@ -1,7 +1,7 @@
 """Locate the native Needle engine, and put it somewhere it will survive.
 
 The Python half of Needle is vendored in ``needle_engine/`` (see its
-``VENDOR.md`` for why). The other half is ``libneedle.so`` — about 13 MB of
+``VENDOR.md`` for why). The other half is ``libneedle.so`` - about 13 MB of
 compiled inference engine, published per platform as a wheel alongside the
 model on Hugging Face. This module is the only thing standing between the two.
 
@@ -10,7 +10,7 @@ Three decisions are worth stating, because none of them is the obvious one.
 **The library lives under ``/config``, not under ``~/.cache``.**
 Upstream's ``_library_path`` caches it in the home directory. In a Home
 Assistant container that is ``/root``, which is *not* preserved across a core
-update — so a household that updates Home Assistant on a bad network day would
+update - so a household that updates Home Assistant on a bad network day would
 find its voice assistant unable to start. Home Assistant's configuration
 directory is the one location guaranteed to persist, so that is where it goes.
 
@@ -21,7 +21,7 @@ to the package, which in turn lets the drift test be a plain byte comparison.
 
 **The download uses ``urllib``, not ``huggingface_hub``.**
 Upstream's ``fetch_library`` pulls in ``huggingface_hub``, whose own dependency
-chain now includes ``hf-xet`` — a compiled Rust extension with no guarantee of a
+chain now includes ``hf-xet`` - a compiled Rust extension with no guarantee of a
 wheel on the architecture and libc combination a given Home Assistant runs on.
 Depending on it to fetch one file over HTTPS would reintroduce, in miniature,
 exactly the packaging problem that vendoring solved. The resolve URL below is
@@ -39,6 +39,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import shutil
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -204,3 +205,48 @@ def bind_library(config_path: str) -> str:
     path = ensure_library(config_path)
     os.environ["NEEDLE_LIB_PATH"] = path
     return path
+
+
+def engine_root(config_path: str) -> Path:
+    """The one directory this component creates outside its own folder.
+
+    Everything downloaded lives under it, one subdirectory per engine version,
+    so uninstalling is a single tree to remove rather than a list of files to
+    keep in step with :func:`library_path`.
+    """
+    return Path(config_path) / _CACHE_DIR
+
+
+def remove_downloads(config_path: str) -> str | None:
+    """Delete every engine this component ever fetched.
+
+    Called when the config entry is removed, which - the manifest declares
+    ``single_config_entry`` - means the last one. Nothing else can be using the
+    directory, and leaving 13 MB per engine version behind after an uninstall
+    is exactly the litter a household cannot be expected to find.
+
+    Blocking: walks a directory and unlinks files. Returns the path that was
+    removed, or ``None`` if there was nothing there.
+    """
+    root = engine_root(config_path)
+    # A symlink is somebody deliberately putting the engine elsewhere - on a
+    # bigger disk, usually. Removing the link is fine; following it out of the
+    # configuration directory to delete whatever is at the other end is not,
+    # and `shutil.rmtree` refuses to anyway.
+    if root.is_symlink():
+        root.unlink()
+        return str(root)
+    if not root.is_dir():
+        return None
+    shutil.rmtree(root)
+    return str(root)
+
+
+def unbind_library() -> None:
+    """Forget the path :func:`bind_library` published.
+
+    The variable is read every time the vendored engine loads its library, so
+    leaving it pointing at a file that has just been deleted turns a later
+    re-install into a confusing failure rather than a fresh download.
+    """
+    os.environ.pop("NEEDLE_LIB_PATH", None)

@@ -58,6 +58,15 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RET", "ASYNC", "PLC0415",
 [tool.ruff.lint.per-file-ignores]
 # Vendored upstream code is not ours to restyle.
 "custom_components/needle_assist/needle_engine/*" = ["ALL"]
+# A test is allowed to say things a module may not.
+#   PLC0415  an import inside a test body is the point - it happens after a
+#            patch is in place, or it names the file under test.
+#   SIM300   the fix reads a SCREAMING_CASE attribute as the constant half and
+#            moves it right, turning `assert SET == {...}` into a Yoda
+#            condition. Subject first is what these assertions are about.
+#   ASYNC240 an async test may touch the filesystem; there is no event loop
+#            here with anything else to do.
+"tests/*" = ["PLC0415", "SIM300", "ASYNC240"]
 
 [tool.coverage.run]
 source = ["custom_components/needle_assist"]

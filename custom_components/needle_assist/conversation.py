@@ -3,7 +3,7 @@
 Sits where an LLM agent would in an Assist pipeline, but is not one: Needle
 returns grammar-constrained tool calls, never prose. So this entity does not
 use Home Assistant's LLM API, does not send a system prompt, and cannot
-hallucinate a service that does not exist — the grammar makes malformed calls
+hallucinate a service that does not exist - the grammar makes malformed calls
 unrepresentable, and :mod:`executor` validates targets against the registry.
 
 Everything runs on the local machine. No network call is made at any point.

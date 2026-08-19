@@ -25,58 +25,54 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          # This repository has no entry in the Home Assistant brands
-          # repository, which HACS checks for. Adding one is a pull request
-          # against home-assistant/brands and cannot be done from here.
+          # HACS looks this domain up in the home-assistant/brands repository,
+          # which is a pull request against that repository and cannot be made
+          # from here. The images themselves ship in
+          # custom_components/needle_assist/brand/, which is where Home
+          # Assistant serves a custom integration's icon from.
           ignore: brands
 
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # Pinned: an unpinned linter turns a new release into a red build on a
+      # repository nobody has touched.
+      - run: pip install ruff==0.16.3
+      - run: ruff check .
+
+  fast:
+    name: Hebrew logic, with nothing installed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # No Home Assistant. Half of this integration is deterministic Hebrew
+      # that runs before and after the model, and it is meant to be testable
+      # without booting anything - so this job is also what proves it still
+      # is. PyYAML is here only so the quality-scale file is parsed rather
+      # than skipped.
+      - run: pip install pytest pyyaml
+      - run: python -m pytest tests -q --ignore=tests/ha
+
   tests:
-    name: Hebrew logic tests
+    name: tests and types
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
-      - run: pip install pytest
-      - run: python -m pytest tests -q
-
-  json:
-    name: JSON and translations
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - name: Every JSON file parses, and every string is translated
-        run: |
-          python - <<'PY'
-          import json, pathlib, sys
-
-          root = pathlib.Path("custom_components/needle_assist")
-          for path in pathlib.Path(".").rglob("*.json"):
-              json.loads(path.read_text(encoding="utf-8"))
-          print("all JSON parses")
-
-          def keys(node, prefix=""):
-              found = set()
-              for key, value in node.items():
-                  found.add(prefix + key)
-                  if isinstance(value, dict):
-                      found |= keys(value, prefix + key + ".")
-              return found
-
-          base = json.loads((root / "strings.json").read_text(encoding="utf-8"))
-          failed = False
-          for path in sorted((root / "translations").glob("*.json")):
-              have = keys(json.loads(path.read_text(encoding="utf-8")))
-              missing = keys(base) - have
-              extra = have - keys(base)
-              if missing or extra:
-                  failed = True
-                  print(f"{path.name}: missing {sorted(missing)} extra {sorted(extra)}")
-              else:
-                  print(f"{path.name}: complete")
-          sys.exit(1 if failed else 0)
-          PY
+          # Home Assistant 2026.8 source uses PEP 696 defaults on generic
+          # classes, which no earlier interpreter can parse.
+          python-version: "3.14"
+      - run: pip install -r requirements_test.txt
+      - name: Tests, with coverage
+        run: python -m pytest tests -q --cov
+      - name: mypy --strict
+        run: mypy custom_components/needle_assist/

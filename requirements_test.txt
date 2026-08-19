@@ -1,0 +1,12 @@
+# What the checks need. Home Assistant itself is not listed: the harness pins
+# exactly one core version per release, and 0.13.356 pins 2026.8.2 - the
+# version this integration is developed and verified against. Left to resolve
+# freely, pip walks the harness back to 0.3.2 and a 2021 core.
+pytest-homeassistant-custom-component==0.13.356
+pytest-cov==7.1.0
+mypy==2.3.1
+
+# `conversation` is a dependency in the manifest, and every test under
+# tests/ha boots it. It does not start without these two.
+hassil==3.11.0
+home-assistant-intents==2026.7.30

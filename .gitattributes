@@ -1,3 +1,8 @@
+# Text is stored and checked out with LF, on every platform. Without this a
+# Windows clone commits CRLF into a repository that Home Assistant runs on
+# Linux, and every file looks entirely rewritten in the next diff.
+* text=auto eol=lf
+
 # The model is a binary archive; never let a checkout rewrite its line endings.
 *.cact binary
 
@@ -5,5 +10,5 @@
 # invalid option name, with no hint that the file is the problem.
 *.sh text eol=lf
 
-# Brand images for the Home Assistant brands repository.
+# The integration's own icons, which Home Assistant serves from brand/.
 *.png binary

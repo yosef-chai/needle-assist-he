@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Scenes and scripts by name, relative steps, notifications, and the satellite.
 
 These are the arguments the model is worst at and the sentence is best at, so
@@ -12,10 +11,17 @@ from typing import Any
 import pytest
 from homeassistant.core import Context, HomeAssistant, ServiceCall
 from homeassistant.helpers import (
-    area_registry as ar, device_registry as dr, entity_registry as er,
+    area_registry as ar,
+)
+from homeassistant.helpers import (
+    device_registry as dr,
+)
+from homeassistant.helpers import (
+    entity_registry as er,
 )
 from pytest_homeassistant_custom_component.common import (
-    MockConfigEntry, async_mock_service,
+    MockConfigEntry,
+    async_mock_service,
 )
 
 from custom_components.needle_assist.const import DOMAIN

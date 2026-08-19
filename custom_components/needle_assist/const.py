@@ -267,7 +267,7 @@ SPEECH_FAILED: Final = "הפעולה נכשלה"
 # Home Assistant's fifteen weather condition states, in Hebrew.
 #
 # `weather.<entity>.state` is an English slug, so speaking it back produced
-# "מזג האוויר sunny, 30 מעלות" on the first live test — an English word in the
+# "מזג האוויר sunny, 30 מעלות" on the first live test - an English word in the
 # middle of a Hebrew sentence, from an assistant whose entire purpose is
 # Hebrew. The keys are read off `homeassistant.components.weather`'s
 # ATTR_CONDITION_* constants rather than guessed, and the set is closed: Home

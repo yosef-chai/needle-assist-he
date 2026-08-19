@@ -22,7 +22,7 @@ One agent is cached per distinct shortlist. Switching between them is cheap by
 construction: ``Needle._bind`` reloads the weight blob only when the *weights
 path* differs from the one already resident (``_active_weights``), so every
 cached agent shares one loaded model and a switch costs a single
-``needle_init`` — a grammar rebuild over five schemas. Each instance also holds
+``needle_init`` - a grammar rebuild over five schemas. Each instance also holds
 its own 64KB response buffer, which is why the cache is bounded rather than
 unbounded.
 """
@@ -182,7 +182,7 @@ class NeedleRunner:
         An empty ``function_calls`` is ambiguous on its own: it is both the
         legitimate refusal for off-topic input AND what a truncated generation
         leaves behind. The two are only distinguishable through ``success`` and
-        ``error`` — e.g. ``"tool call truncated: token budget exhausted"``.
+        ``error`` - e.g. ``"tool call truncated: token budget exhausted"``.
         Conflating them reports a broken model as a polite refusal, which is
         exactly how a bad export stayed invisible here for a whole run.
         """

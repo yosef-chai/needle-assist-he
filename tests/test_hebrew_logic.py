@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """The deterministic half of the integration, tested without Home Assistant.
 
 Everything here runs before or after the model, and every case is one that was

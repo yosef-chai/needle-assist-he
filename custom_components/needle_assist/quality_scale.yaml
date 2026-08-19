@@ -9,8 +9,13 @@
 #
 #   ruff check custom_components/needle_assist          - clean
 #   mypy custom_components/needle_assist                - clean, --strict
-#   pytest tests --cov                                  - 225 passed, 95%
+#   pytest tests --cov                                  - 231 passed, 95%
 #   pytest tests/ha/test_config_flow.py --cov=...config_flow  - 100%
+#
+# One thing the scale has no rule for, recorded because it is asked about:
+# nothing this integration creates outlives it. `async_remove_entry` deletes
+# the engine it downloaded and closes the repair it raised, neither of which
+# Home Assistant knows to clean up on its own.
 #
 rules:
   # ---------------------------------------------------------------- Bronze
@@ -27,9 +32,9 @@ rules:
     status: done
     comment: The eight brand images ship in `brand/`, which core's `brands`
       integration serves for custom integrations at
-      /api/brands/integration/needle_assist/. The same files are staged under
-      `brands/` in the repository root for the home-assistant/brands pull
-      request, which is what a core integration would use instead.
+      /api/brands/integration/needle_assist/. A core integration would instead
+      have them in the home-assistant/brands repository, which is a pull
+      request against that repository rather than anything in this one.
   common-modules:
     status: done
     comment: The Hebrew logic lives in named modules used by both the agent and
@@ -57,7 +62,11 @@ rules:
     comment: The integration provides no conditions.
   docs-high-level-description: done
   docs-installation-instructions: done
-  docs-removal-instructions: done
+  docs-removal-instructions:
+    status: done
+    comment: Both READMEs say it, and `async_remove_entry` does it - the
+      downloaded engine and the repair issue go with the entry, so the
+      instructions are one menu item rather than a list of paths.
   entity-event-setup:
     status: done
     comment: The area and entity registry listeners are subscribed in
@@ -73,10 +82,10 @@ rules:
       `NeedleConfigEntry = ConfigEntry[NeedleRunner]`.
   test-before-configure:
     status: done
-    comment: There is no service to connect to - the model is a file on disk -
-      so the config flow validates that file instead: that the path resolves,
-      and that it is a `.cact` archive rather than a training checkpoint.
-      Both errors are shown in the dialog.
+    comment: 'There is no service to connect to - the model is a file on disk - so
+      the config flow validates that file instead: that the path resolves, and
+      that it is a `.cact` archive rather than a training checkpoint. Both
+      errors are shown in the dialog.'
   test-before-setup:
     status: done
     comment: Setup fetches the engine and loads the weights, and raises
@@ -117,7 +126,7 @@ rules:
       service, and holds no credential.
   test-coverage:
     status: done
-    comment: 95% over the integration, 225 tests. The vendored engine is
+    comment: 95% over the integration, 231 tests. The vendored engine is
       excluded, as an upstream dependency with its own tests.
 
   # ------------------------------------------------------------------ Gold

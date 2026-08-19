@@ -1,11 +1,9 @@
-# -*- coding: utf-8 -*-
 """The diagnostics report, and the one line in it that used to lie."""
 
 from __future__ import annotations
 
 import pathlib
 from typing import Any
-from unittest.mock import patch
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant

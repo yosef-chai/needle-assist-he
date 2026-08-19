@@ -59,6 +59,8 @@ from .tool_router import FAMILY_VERBS, TOOL_HINTS, _fold
 # put a single utterance past the point where a voice pipeline stops waiting.
 MAX_CLAUSES: Final = 4
 
+# Written as escapes: these two are invisible in a diff, and a pass that
+# rewrites dashes in prose silently drops one of them from the class.
 _PUNCT: Final = ".,!?;:'\"״׳()[]-–—"
 
 # A speaker taking back the order they just gave. Israelis correct

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """The half of the integration that actually touches the house.
 
 Everything here goes through `CallExecutor.execute`, which is where a tool call
@@ -11,9 +10,11 @@ from typing import Any
 
 import pytest
 from homeassistant.core import Context, HomeAssistant, ServiceCall
-from homeassistant.helpers import area_registry as ar, entity_registry as er
+from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import (
-    MockConfigEntry, async_mock_service,
+    MockConfigEntry,
+    async_mock_service,
 )
 
 from custom_components.needle_assist.const import DOMAIN
