@@ -102,11 +102,12 @@
 | | |
 |---|---|
 | בחירת הכלי הנכון | **76.4%** |
-| כלי **וגם** כל הארגומנטים | **58.2%** |
+| כלי **וגם** כל הארגומנטים | **61.7%** |
 | משפט עם כמה פקודות — בחירת הכלים | **95.3%** (היה 0.0%) |
 | משפט עם כמה פקודות — כלים וארגומנטים | **91.7%** |
 | תיקון עצמי באמצע משפט ("לא לא, תעשה...") | **100%** |
 | "בכל הבית" | **98.7%** |
+| מהירות שאיבה, מצב מאוורר וצבע — נקראים מהמשפט | **808 / 0** |
 | בקשות מוזיקה — הכלי הנכון | **88.6%** |
 | בקשות מוזיקה — הכלי, השם והסוג | **72.4%** |
 | נעילה ופתיחה — הכיוון הנכון | **95.9%** |
@@ -122,7 +123,7 @@
 
 **וכמה מזה הוא המודל?** אותם משקלים בדיוק, אותן שאלות, בלי השכבה
 הדטרמיניסטית סביבם: **51.1%** בחירת כלי במקום 76.4%, **28.9%** התאמה מלאה
-במקום 58.2%, ו‑**0.5%** סירוב נכון במקום 75.0%. קרוב לחצי ממה שהמערכת עושה
+במקום 61.7%, ו‑**0.5%** סירוב נכון במקום 75.0%. קרוב לחצי ממה שהמערכת עושה
 נכון, היא עושה מחוץ למודל.
 
 **למה זיהוי החדר גבוה בהרבה מדיוק המודל?** כי הוא לא נעשה במודל. המודל מכיר 12 קודי חדר קבועים באנגלית; בית אמיתי לא מתחלק ל‑12. אז החדר, שם המכשיר, שם הסצנה ותוכן ההתראה נקראים מהמשפט בקוד דטרמיניסטי מול הרישומים האמיתיים של Home Assistant. אותה בחירה נעשתה גם לגבי בחירת הכלי ולגבי הסירוב: **כל מה שאפשר להכריע בוודאות, מוכרע מחוץ למודל.**
@@ -196,11 +197,12 @@ On **all 2,379 rows** of the held-out test set, out of 22,520 generated:
 | | |
 |---|---|
 | correct tool | **76.4%** |
-| tool **and** every argument | **58.2%** |
+| tool **and** every argument | **61.7%** |
 | multi-order sentences, correct tool set | **95.3%** (was 0.0%) |
 | multi-order sentences, tools and arguments | **91.7%** |
 | mid-sentence self-correction ("no no, do...") | **100%** |
 | "the whole house" | **98.7%** |
+| fan speed, fan mode and colour, read from the sentence | **808 / 0** |
 | music requests, correct tool | **88.6%** |
 | music requests, tool, title and kind | **72.4%** |
 | lock and unlock, the right direction | **95.9%** |
@@ -216,7 +218,7 @@ On **all 2,379 rows** of the held-out test set, out of 22,520 generated:
 
 **And how much of that is the model?** The same weights, the same questions,
 without the deterministic layer around them: **51.1%** correct tool instead of
-76.4%, **28.9%** exact instead of 58.2%, and **0.5%** correct refusal instead
+76.4%, **28.9%** exact instead of 61.7%, and **0.5%** correct refusal instead
 of 75.0%. Nearly half of what this system gets right, it gets right outside the
 model.
 
