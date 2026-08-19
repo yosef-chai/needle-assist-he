@@ -240,8 +240,10 @@ Correct-refusal rate for every model trained here: **0.0%**. False actuation on
 off-topic input: ~100%. Training a refusal class was tried; the model memorised
 the training refusals and generalised none of them.
 
-The router's family score does the job instead: 73.9% of off-topic utterances
-score below the threshold, against 2.54% of genuine commands. The asymmetry is
+The router's family score does the job instead: 75.0% of off-topic utterances
+score below the threshold, against 1.87% of genuine commands. A named room
+counts for two of the three the gate asks for - nobody says "בסלון" about the
+pyramids - and deliberately not three, so a room never clears the bar alone. The asymmetry is
 deliberate — a refused command costs a repeat, an actuated question costs a
 device moving in someone's house.
 

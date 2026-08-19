@@ -24,8 +24,8 @@ near-constant top five, so ``light_turn_on`` came back as ``cover_open``,
 Declaring five or fewer tools bypasses the head entirely. That is also exactly
 the shape the model was fine-tuned on: every training row carries a candidate
 set of about five tools (gold plus same-family adversarial distractors), so
-declaring all 41 at inference is a distribution shift away from training as well
-as a retrieval problem.
+declaring the whole catalogue at inference is a distribution shift away from
+training as well as a retrieval problem.
 
 Hence this module. It is deliberately a plain keyword scorer rather than
 anything learned:
@@ -50,6 +50,7 @@ from __future__ import annotations
 import re
 from typing import Final
 
+from .area_map import AREA_ALIASES
 from .hebrew_text import PhraseIndex, normalise
 
 MAX_TOOLS: Final = 5
@@ -645,6 +646,15 @@ def select_tool_names(query: str, limit: int = MAX_TOOLS) -> list[str]:
 
 REFUSE_BELOW: Final = 3
 
+# A room is worth two: strong evidence that a sentence is about the house,
+# and deliberately less than the three a device noun is worth, because a
+# room names a place and not a thing to act on. See `looks_off_topic`.
+ROOM_WEIGHT: Final = 2
+
+_ROOMS: Final = PhraseIndex()
+for _slug, _forms in AREA_ALIASES.items():
+    _ROOMS.extend(_forms, _slug)
+
 
 def looks_off_topic(query: str, threshold: int = REFUSE_BELOW) -> bool:
     """True when nothing in the utterance names a device this house controls.
@@ -664,19 +674,39 @@ def looks_off_topic(query: str, threshold: int = REFUSE_BELOW) -> bool:
         actionable  67.2% score exactly 3, 21.8% score 4, only 3.3% below 3
         off-topic   73.9% below 3
 
-    So the gate sits at 3, which catches 73.9% of off-topic utterances while
-    refusing 3.35% of genuine ones. Threshold 2 costs almost the same (3.27%)
-    and catches only 60.6%, and 4 is off a cliff - it would block 70.6% of real
+    So the gate sits at 3, which caught 73.9% of off-topic utterances while
+    refusing 3.35% of genuine ones. Threshold 2 cost almost the same (3.27%)
+    and caught only 60.6%, and 4 is off a cliff - it would block 70.6% of real
     commands, since scoring exactly 3 is the *normal* case for one device noun.
+    (Those four are the figures that chose the threshold, on the corpus of the
+    time. The current ones are two paragraphs down.)
 
     The asymmetry is what justifies it. A false refusal says "I didn't
     understand" and the user repeats themselves; a false actuation opens a blind
     or unlocks a door because someone mentioned the weather. This trades the
     benign error for the dangerous one, and it is the same reasoning that put
     tool selection in a deterministic router rather than in the retrieval head.
+
+    A named room is worth two of the three on its own. Nobody says "בסלון"
+    about the pyramids, and one signal short of the bar is where the genuine
+    commands were piling up - "תפעיל לי משהו בסלון" scores one for the play
+    verb and was thrown away before the model ever saw it. Measured over the
+    held-out set, the room bonus rescues 34 real commands (3.42% wrongly
+    refused down to 1.87%) and lets three off-topic ones through, from 76.6%
+    caught to 75.0%.
+
+    All three of those are questions - "כמה עולה לשכור חניה בתל אביב" - so
+    :func:`looks_like_question` has already restricted them to the two
+    read-only tools and none of them can move anything. That is also why the
+    bonus stops at two: at three a room passes the gate by itself, which lets
+    through "הגינה של השכנים מוזנחת" and "לאיזה מוסך כדאי לקחת את האוטו" -
+    neither of them a question, both handed a shortlist that can actuate.
     """
     scored = score_families(query)
-    return (scored[0][1] if scored else 0) < threshold
+    score = scored[0][1] if scored else 0
+    if _ROOMS.find(query, fuzzy=False):
+        score += ROOM_WEIGHT
+    return score < threshold
 
 
 # Hebrew negation. Deliberately a short list of *unambiguous* forms.

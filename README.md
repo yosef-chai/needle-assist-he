@@ -110,8 +110,8 @@
 | ניתוב לכלי הנכון (רשימה מקוצרת) | 99.1% |
 | שאלות שקיבלו כלים לקריאה בלבד, ולכן לא יכלו להפעיל כלום | 82.0% |
 | פקודות אמיתיות שסווגו בטעות כשאלה | **0 מתוך 15,709** |
-| סירוב נכון לאמירות מחוץ לתחום | 73.9% |
-| פקודות אמיתיות שנדחו בטעות | 2.54% |
+| סירוב נכון לאמירות מחוץ לתחום | 75.0% |
+| פקודות אמיתיות שנדחו בטעות | 1.87% |
 
 **למה זיהוי החדר גבוה בהרבה מדיוק המודל?** כי הוא לא נעשה במודל. המודל מכיר 12 קודי חדר קבועים באנגלית; בית אמיתי לא מתחלק ל‑12. אז החדר, שם המכשיר, שם הסצנה ותוכן ההתראה נקראים מהמשפט בקוד דטרמיניסטי מול הרישומים האמיתיים של Home Assistant. אותה בחירה נעשתה גם לגבי בחירת הכלי ולגבי הסירוב: **כל מה שאפשר להכריע בוודאות, מוכרע מחוץ למודל.**
 
@@ -125,7 +125,7 @@
 - **חיתוך המשפט מסתמך על פועל.** "תדליק את האור בסלון, ובמטבח תסגור" — פועל שבא אחרי החדר במקום לפניו — לא תמיד ייחתך נכון. הניסוח הרגיל, פועל בתחילת כל פקודה, כן.
 - **מוזיקה בשם דורשת [Music Assistant](https://www.music-assistant.io/).** בלעדיו "תנגן לי כוורת" פשוט ימשיך נגינה על הרמקול שבחדר, כי אין ספרייה לחפש בה. שם השיר נקרא מהמשפט — המודל לא ממציא שמות ולא "יודע" באיזה אלבום שיר נמצא; החיפוש עצמו נעשה על ידי Music Assistant.
 - **שאלה בלי מילת שאלה לא תמיד מזוהה ככזו.** "התריס בסלון פתוח" בלי סימן שאלה עמום גם בעברית; כ‑18% מהשאלות נופלות לשם. הן לא יפעילו כלום בטעות, אבל הן עלולות לא לענות.
-- **המודל עצמו לא מסרב לכלום** — שיעור הסירוב הנכון שלו נמדד ב‑0.0%. הסירוב כולו נעשה בקוד, ותופס 73.9% מהאמירות שמחוץ לתחום. השאר יגיעו למודל.
+- **המודל עצמו לא מסרב לכלום** — שיעור הסירוב הנכון שלו נמדד ב‑0.0%. הסירוב כולו נעשה בקוד, ותופס 75.0% מהאמירות שמחוץ לתחום. השאר יגיעו למודל.
 - **רף הביטחון לא שמיש.** הכיוונון לא מעדכן את ראש הביטחון של המנוע, וקריאות נכונות שאינן באנגלית נמדדו עם ביטחון 0.0. כל רף מעל 0 ידחה פקודות תקינות. לכן ברירת המחדל 0.
 - **טקסט חופשי בארגומנט נלקח מהמשפט, לא מהמודל.** עברית מגיעה לארגומנט של כלי כרצף בריחה של שישה תווים לאות, והמודל טועה בהם. גוף ההתראה נחתך מהמשפט עצמו; אם אי אפשר לחתוך אותו — ההתראה לא נשלחת, במקום לשלוח ג'יבריש.
 - **ישות בלי אזור לא נגישה בפקודת חדר.** זו התנהגות של Home Assistant, לא באג כאן, אבל היא מפתיעה.
@@ -192,8 +192,8 @@ On 400 unseen held-out rows, and across all 18,806 generated rows:
 | tool shortlist recall | 99.1% |
 | questions given read-only tools only, so they cannot actuate | 82.0% |
 | real commands wrongly classified as questions | **0 of 15,709** |
-| off-topic correctly refused | 73.9% |
-| real commands wrongly refused | 2.54% |
+| off-topic correctly refused | 75.0% |
+| real commands wrongly refused | 1.87% |
 
 Room resolution beats the model's own accuracy because it is not done by the model. The model knows twelve fixed English room slugs; a real house does not partition into twelve. So the room, the device name, the scene name and the notification text are read out of the sentence by deterministic code against Home Assistant's own registries. The same choice was made for tool selection and for refusal: **anything that can be decided with certainty is decided outside the model.**
 
@@ -205,7 +205,7 @@ See [`docs/HOW-IT-WORKS.md`](docs/HOW-IT-WORKS.md).
 - **Cutting the sentence relies on a verb.** An order whose verb comes after the room rather than before it may not be separated. The ordinary phrasing, a verb at the head of each order, is.
 - **Playing music by name needs [Music Assistant](https://www.music-assistant.io/).** Without it, a request to play something resumes the room's speaker instead, because there is no library to search. The title comes out of the sentence; nothing here tries to *know* which album a song is on — Music Assistant does the lookup.
 - **A question with no interrogative** ("the blind in the living room [is] open") is not always recognised as one. It cannot actuate by accident, but it may not answer.
-- **The model itself never refuses anything** — 0.0% correct refusal measured. Refusal is done in code and catches 73.9% of off-topic utterances.
+- **The model itself never refuses anything** — 0.0% correct refusal measured. Refusal is done in code and catches 75.0% of off-topic utterances.
 - **The confidence threshold is unusable.** Fine-tuning does not update the engine's confidence head and correct non-English calls measure 0.0, so any threshold above 0 rejects valid commands. Hence the default of 0.
 - **Free-text arguments come from the sentence, not the model.** Hebrew reaches a tool argument as six-character escapes and the model gets them wrong.
 - **Hebrew only.** The integration declares `he` rather than `MATCH_ALL`.

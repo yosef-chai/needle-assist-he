@@ -540,3 +540,23 @@ def test_a_vague_request_reaches_audio_without_unlocking_the_gate():
 def test_where_to_play_it_is_not_what_to_play(sentence, media_id):
     found = SLOT.extract_music(sentence)
     assert (found.media_id if found else None) == media_id, sentence
+
+
+def test_naming_a_room_says_the_sentence_is_about_the_house():
+    """A room is worth two of the three the gate asks for, and never three.
+
+    "תפעיל לי משהו בסלון" scores one for the play verb and was being thrown
+    away before the model ever saw it - 34 real commands were, on the held-out
+    set. Nobody says "בסלון" about the pyramids.
+
+    Two rather than three because a room names a place and not a thing to act
+    on: at three a room passes the gate on its own, and "הגינה של השכנים
+    מוזנחת" is not a question, so it would be handed a shortlist that can
+    actuate.
+    """
+    assert not ROUTER.looks_off_topic("תפעיל לי משהו בסלון")
+    assert not ROUTER.looks_off_topic("תנגן לנו משהו טוב בחדר השינה")
+    # Chatter stays refused, with a room in it or without one.
+    assert ROUTER.looks_off_topic("תספר לי משהו על הפירמידות")
+    assert ROUTER.looks_off_topic("הגינה של השכנים מוזנחת")
+    assert ROUTER.looks_off_topic("לאיזה מוסך כדאי לקחת את האוטו")

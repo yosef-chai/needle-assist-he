@@ -11,8 +11,9 @@ Two constraints drive the design:
   state, so a lock serialises them.
 
 The toolset is chosen per utterance rather than bound once, because declaring
-all 41 tools hands tool selection to Needle's retrieval head, and measurement
-says that head cannot read Hebrew: 6.8% tool-set accuracy with 41 declared
+every tool hands tool selection to Needle's retrieval head, and measurement
+says that head cannot read Hebrew: 6.8% tool-set accuracy with all of them
+declared
 against 54.4% with a five-tool shortlist. ``tool_router`` picks the shortlist
 from the Hebrew text, which keeps the engine at or below the five-tool threshold
 where the retrieval head does not run at all.
