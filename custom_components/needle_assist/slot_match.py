@@ -47,7 +47,8 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any, Final, Iterable
+from collections.abc import Iterable
+from typing import Any, Final
 
 from .area_map import AREA_ALIASES, slug_for_name
 from .hebrew_text import PhraseIndex, normalise

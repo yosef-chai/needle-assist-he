@@ -12,11 +12,10 @@ Everything runs on the local machine. No network call is made at any point.
 from __future__ import annotations
 
 import logging
-from typing import Literal
+from typing import Final, Literal
 
 from homeassistant.components import conversation
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import MATCH_ALL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import (
     area_registry as ar,
@@ -31,9 +30,25 @@ from .const import (
     DEFAULT_MAX_TOKENS, DEFAULT_REFUSE_GATE, DOMAIN, SPEECH_FAILED,
     SPEECH_NOTHING, SPEECH_NO_TARGET, SPEECH_OK,
 )
-from .executor import CallExecutor
+from .executor import CallExecutor, CallOutcome
 
 _LOGGER = logging.getLogger(__name__)
+
+# Stands in for the tool name on a clause the engine never got through, so
+# that a failure there is counted alongside the calls that did run.
+ENGINE: Final = "engine failure"
+
+# Hebrew makes the noun and the verb agree with the number, so a count
+# spliced into a sentence has to be spelled out to come out as Hebrew:
+# "1 פעולות נכשלו" is a machine talking. Four is where the table stops
+# because `clause_split.MAX_CLAUSES` is four; beyond that a digit reads
+# naturally anyway.
+_FAILURES: Final[dict[int, str]] = {
+    1: "פעולה אחת נכשלה",
+    2: "שתי פעולות נכשלו",
+    3: "שלוש פעולות נכשלו",
+    4: "ארבע פעולות נכשלו",
+}
 
 
 async def async_setup_entry(
@@ -135,21 +150,25 @@ class NeedleConversationEntity(conversation.ConversationEntity):
         if len(clauses) > 1:
             _LOGGER.debug("%r split into %s", user_input.text, clauses)
 
-        outcomes = []
+        outcomes: list[CallOutcome] = []
+        # The first engine error, kept for the spoken reply. Only reached
+        # when nothing else in the sentence succeeded.
+        engine_error: str | None = None
         for clause in clauses:
             try:
                 result = await self.hass.async_add_executor_job(
                     self._runner.complete, clause, max_tokens
                 )
             except Exception as err:
-                _LOGGER.exception("Needle inference failed")
-                response.async_set_error(
-                    intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
-                    f"{SPEECH_FAILED}: {err}",
-                )
-                return conversation.ConversationResult(
-                    response=response, conversation_id=user_input.conversation_id
-                )
+                # One clause failing is not the sentence failing. The
+                # orders before this one have already run and the ones
+                # after it can still run, so this is recorded as a failed
+                # outcome and the loop goes on - a flat return here would
+                # both hide what happened and drop what was still to do.
+                _LOGGER.exception("Needle inference failed on %r", clause)
+                engine_error = engine_error or str(err)
+                outcomes.append(CallOutcome(ENGINE, False, ENGINE))
+                continue
 
             calls = self._runner.calls_of(result)
             confidence = float(result.get("confidence") or 0.0)
@@ -160,13 +179,9 @@ class NeedleConversationEntity(conversation.ConversationEntity):
             # apart.
             if (failure := self._runner.failed(result)) is not None:
                 _LOGGER.error("engine failure on %r: %s", clause, failure)
-                response.async_set_error(
-                    intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
-                    f"{SPEECH_FAILED}: {failure}",
-                )
-                return conversation.ConversationResult(
-                    response=response, conversation_id=user_input.conversation_id
-                )
+                engine_error = engine_error or str(failure)
+                outcomes.append(CallOutcome(ENGINE, False, ENGINE))
+                continue
 
             # Off by default: the confidence head is not updated by fine-tuning
             # and reads 0.0 on correct non-English calls. See
@@ -197,25 +212,31 @@ class NeedleConversationEntity(conversation.ConversationEntity):
                 response=response, conversation_id=user_input.conversation_id
             )
 
-        spoken = [o.speech for o in outcomes if o.ok and o.speech]
+        spoken = ". ".join(o.speech for o in outcomes if o.ok and o.speech)
         succeeded = [o for o in outcomes if o.ok]
         failed = [o for o in outcomes if not o.ok]
 
-        if spoken:
-            response.async_set_speech(". ".join(spoken))
-        elif succeeded and not failed:
-            response.async_set_speech(SPEECH_OK)
-        elif succeeded and failed:
+        if succeeded and failed:
+            # Both halves get said. A sentence carrying four orders can
+            # have one of them fail while another announces what it is
+            # playing, and speaking only the success would leave the
+            # dropped order sounding like it ran.
+            counted = _FAILURES.get(
+                len(failed), f"{len(failed)} פעולות נכשלו")
+            partial = f"{SPEECH_OK} חלקית, {counted}"
             response.async_set_speech(
-                f"{SPEECH_OK} חלקית, {len(failed)} פעולות נכשלו"
-            )
+                f"{spoken}. {partial}" if spoken else partial)
+        elif succeeded:
+            response.async_set_speech(spoken or SPEECH_OK)
         elif all(o.detail == "no matching entities" for o in failed):
             response.async_set_error(
                 intent.IntentResponseErrorCode.NO_VALID_TARGETS, SPEECH_NO_TARGET
             )
         else:
             response.async_set_error(
-                intent.IntentResponseErrorCode.FAILED_TO_HANDLE, SPEECH_FAILED
+                intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+                f"{SPEECH_FAILED}: {engine_error}" if engine_error
+                else SPEECH_FAILED,
             )
 
         return conversation.ConversationResult(

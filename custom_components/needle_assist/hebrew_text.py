@@ -40,7 +40,8 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Final, Iterable
+from collections.abc import Iterable
+from typing import Final
 
 # Hebrew points, accents and cantillation. Nobody types these at an assistant,
 # but they arrive from copied text and from some keyboards, and an unstripped

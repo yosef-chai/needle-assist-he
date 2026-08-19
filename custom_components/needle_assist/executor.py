@@ -322,6 +322,9 @@ class CallExecutor:
             return CallOutcome(tool, False, f"unknown tool {tool}")
 
         domain, service = SERVICE_MAP[tool]
+        # Where to look for entities, which is not always where the
+        # service lives - see const.TOOL_DOMAIN.
+        target = TOOL_DOMAIN[tool]
 
         if tool in NAME_ADDRESSED:
             named_domain = NAME_ADDRESSED[tool]
@@ -341,8 +344,8 @@ class CallExecutor:
             entity_ids = [s.entity_id for s in self.hass.states.async_all("notify")]
         else:
             # A device named outright beats the room it stands in.
-            entity_ids = (self.slots.entities(utterance, domain)
-                          if utterance and domain in slot_match.NAMEABLE_DOMAINS
+            entity_ids = (self.slots.entities(utterance, target)
+                          if utterance and target in slot_match.NAMEABLE_DOMAINS
                           else [])
             if entity_ids:
                 _LOGGER.debug("targeting named entities %s", entity_ids)
@@ -351,7 +354,7 @@ class CallExecutor:
                     device_id, utterance, index, total)
                 if unresolvable:
                     return CallOutcome(tool, False, "no matching entities")
-                entity_ids = self._match_entities(domain, area_ids, all_areas)
+                entity_ids = self._match_entities(target, area_ids, all_areas)
 
         if not entity_ids:
             return CallOutcome(tool, False, "no matching entities")
