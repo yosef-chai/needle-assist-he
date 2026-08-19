@@ -302,7 +302,26 @@ class MusicRequest:
 #: the vacuum's strongest suction is ``turbo`` and the air conditioner's is
 #: ``high`` - which is why they are separate tables keyed by slot rather than
 #: one shared list.
+#: ``color_name`` is here on a shorter leash than the other two, and the reason
+#: is a morphological accident worth recording: ``להוריד`` - *to lower* - is
+#: ``ל`` + ``ה`` + ``ורוד``, and ``ורוד`` is *pink*. The prefix chain that lets
+#: "בסלון" find the living room turns "להוריד את התאורה" into a request for a
+#: pink light, on 21 calls of the corpus that name no colour at all. So this
+#: slot is only ever *corrected*, never *added*: see `executor._service_data`.
+#: On the calls that do carry a colour the reading is 335 right and 0 wrong.
 SETTING_WORDS: Final[dict[str, dict[str, str]]] = {
+    "color_name": {
+        "אדום": "red", "אדומה": "red",
+        "כחול": "blue", "כחולה": "blue",
+        "ירוק": "green", "ירוקה": "green",
+        "צהוב": "yellow", "צהובה": "yellow",
+        "כתום": "orange", "כתומה": "orange",
+        "סגול": "purple", "סגולה": "purple",
+        "ורוד": "pink", "ורודה": "pink",
+        "לבן": "white", "לבנה": "white",
+        "חמים": "warm_white", "חמימה": "warm_white",
+        "קר": "cool_white", "קריר": "cool_white", "קרה": "cool_white",
+    },
     "fan_speed": {
         "שקט": "silent", "שקטה": "silent",
         "רגיל": "standard", "רגילה": "standard",

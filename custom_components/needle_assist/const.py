@@ -141,6 +141,13 @@ SETTING_SLOT: Final = {
     "climate_set_fan_mode": "fan_mode",
 }
 
+# The same idea where the sentence may only *correct* the model, never fill a
+# slot the model left empty - see `slot_match.SETTING_WORDS` for why `ורוד`
+# cannot be trusted to mean somebody asked for pink.
+CORRECT_ONLY_SLOT: Final = {
+    "light_turn_on": "color_name",
+}
+
 # The audio tools a named title can be promoted out of. `music_play` is absent
 # because it is the destination, and the query tools because a question about
 # music is not a request to play it.

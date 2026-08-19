@@ -53,7 +53,8 @@ from homeassistant.helpers import (
 
 from . import direction, slot_match, tool_router
 from .const import (
-    ALL_WHEN_UNNAMED, CONF_MUSIC_PLAYER, MEDIA_TOOLS, MUSIC_INTEGRATION,
+    ALL_WHEN_UNNAMED, CONF_MUSIC_PLAYER, CORRECT_ONLY_SLOT, MEDIA_TOOLS,
+    MUSIC_INTEGRATION,
     SETTING_SLOT,
     NAME_ADDRESSED,
     NON_SERVICE_ARGS, QUERY_TOOLS, ROUTINE_SIBLING, SERVICE_MAP, TOOL_DOMAIN,
@@ -219,6 +220,22 @@ class CallExecutor:
             k: v for k, v in args.items() if k not in NON_SERVICE_ARGS
         }
 
+        # Slots the sentence names outright. These come first and stand apart
+        # from the arithmetic below, because they are not a translation of the
+        # model's answer - they replace it. See `slot_match.SETTING_WORDS`.
+        if utterance:
+            # The speaker said "שקט" or "גבוה", and which of the enum's values
+            # that is does not need a model: 474 right and 0 wrong.
+            if (slot := SETTING_SLOT.get(tool)) and (
+                    said := slot_match.setting_from(utterance, slot)):
+                data[slot] = said
+            # And the same for a colour, except that this one may only correct
+            # a value the model already chose and never add one - "להוריד"
+            # contains "ורוד".
+            if (slot := CORRECT_ONLY_SLOT.get(tool)) and slot in data and (
+                    said := slot_match.setting_from(utterance, slot)):
+                data[slot] = said
+
         if tool == "media_set_volume":
             # HA takes volume_level as 0..1; the model speaks in percent.
             if "volume_pct" in data:
@@ -227,15 +244,6 @@ class CallExecutor:
                 step = data.pop("volume_step_pct") / 100
                 current = self._first_attr(entity_ids, "volume_level", 0.5)
                 data["volume_level"] = max(0.0, min(1.0, current + step))
-
-        elif tool in SETTING_SLOT:
-            # The speaker said "שקט" or "גבוה", and which of the enum's values
-            # that is does not need a model - see `slot_match.SETTING_WORDS`,
-            # measured at 474 right and 0 wrong. The model keeps the slot when
-            # the sentence names nothing.
-            slot = SETTING_SLOT[tool]
-            if utterance and (said := slot_match.setting_from(utterance, slot)):
-                data[slot] = said
 
         elif tool == "climate_set_temperature":
             if "temperature_step" in data:
