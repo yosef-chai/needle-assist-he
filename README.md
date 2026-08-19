@@ -36,6 +36,7 @@
 - **כמה פעולות במשפט אחד.** "תכבה את האור במטבח וסגור את התריסים בחדר שינה" זה שתי פקודות, והן מבוצעות שתיהן. המשפט נחתך לפני שהמודל רואה אותו, ורק במקום שבו באמת מתחילה פקודה חדשה — "תדליק את האור בסלון ובמטבח" נשאר פקודה אחת שפועלת על שני החדרים.
 - **מנגן מוזיקה בשם** דרך [Music Assistant](https://www.music-assistant.io/): "תנגן לי את האלבום שבלול של כוורת", "שים פלייליסט רגוע בסלון", "תנגן רדיו גלגלצ". שם השיר נקרא מהמשפט, לא מומצא על ידי המודל. בלי Music Assistant מותקן זה פשוט ממשיך נגינה על הרמקול שבחדר.
 - **שאלה לא יכולה להפעיל כלום.** "מה המצב של האור במטבח" מחזיר תשובה — הוא לא מדליק את האור.
+- **הפועל בעברית קובע את הכיוון.** "נעל את הדלת" נועל, "תנמיך את המזגן" מוריד. מודל טועה בכיוון לפעמים, וזו הטעות הגרועה ביותר שעוזר בית יכול לעשות — אז המילים גוברות עליו. נמדד על כל קבוצת המבחן: **1337 פעמים המילים מסכימות עם התווית, 0 פעמים הן סותרות אותה**.
 - **מסרב למה שלא קשור לבית**, ומסרב לפקודות שליליות ("אל תדליק").
 - עונה בעברית.
 
@@ -96,22 +97,31 @@
 
 ## מה נמדד
 
-על 400 שורות מקבוצת בדיקה שלא נראתה באימון, ועל כל 18,806 השורות שנוצרו:
+על **כל 2,379 השורות** של קבוצת בדיקה שלא נראתה באימון, מתוך 22,520 שורות שנוצרו:
 
 | | |
 |---|---|
-| בחירת הכלי הנכון | 66.8% |
-| כלי **וגם** כל הארגומנטים | 44.2% |
-| משפט עם כמה פקודות — בחירת הכלים | **75.3%** (היה 0.0%) |
-| בקשות מוזיקה — הכלי הנכון בפועל | **86.2%** |
-| בקשות מוזיקה — שם השיר נקרא נכון מהמשפט | **83 מתוך 85** |
-| זיהוי החדר (בקוד, לא במודל) | **99.0%** |
+| בחירת הכלי הנכון | **74.9%** |
+| כלי **וגם** כל הארגומנטים | **55.7%** |
+| משפט עם כמה פקודות — בחירת הכלים | **95.3%** (היה 0.0%) |
+| משפט עם כמה פקודות — כלים וארגומנטים | **91.7%** |
+| תיקון עצמי באמצע משפט ("לא לא, תעשה...") | **100%** |
+| "בכל הבית" | **98.7%** |
+| נעילה ופתיחה — הכיוון הנכון | **95.9%** |
+| הכיוון נקרא מהמילים: מסכים / סותר את התווית | **1337 / 0** |
+| הסימן של שינוי יחסי: מסכים / סותר | **1222 / 1** |
+| זיהוי החדר (בקוד, לא במודל) | **99.5%** |
 | זיהוי חדר במילים נרדפות שלא נראו באימון | **100%** |
 | ניתוב לכלי הנכון (רשימה מקוצרת) | 99.1% |
-| שאלות שקיבלו כלים לקריאה בלבד, ולכן לא יכלו להפעיל כלום | 82.0% |
-| פקודות אמיתיות שסווגו בטעות כשאלה | **0 מתוך 15,709** |
+| שאלות שקיבלו כלים לקריאה בלבד, ולכן לא יכלו להפעיל כלום | **84.4%** |
+| פקודות אמיתיות שסווגו בטעות כשאלה | **0 מתוך 19,158** |
 | סירוב נכון לאמירות מחוץ לתחום | 75.0% |
 | פקודות אמיתיות שנדחו בטעות | 1.87% |
+
+**וכמה מזה הוא המודל?** אותם משקלים בדיוק, אותן שאלות, בלי השכבה
+הדטרמיניסטית סביבם: **51.1%** בחירת כלי במקום 74.9%, **28.9%** התאמה מלאה
+במקום 55.7%, ו‑**0.5%** סירוב נכון במקום 75.0%. קרוב לחצי ממה שהמערכת עושה
+נכון, היא עושה מחוץ למודל.
 
 **למה זיהוי החדר גבוה בהרבה מדיוק המודל?** כי הוא לא נעשה במודל. המודל מכיר 12 קודי חדר קבועים באנגלית; בית אמיתי לא מתחלק ל‑12. אז החדר, שם המכשיר, שם הסצנה ותוכן ההתראה נקראים מהמשפט בקוד דטרמיניסטי מול הרישומים האמיתיים של Home Assistant. אותה בחירה נעשתה גם לגבי בחירת הכלי ולגבי הסירוב: **כל מה שאפשר להכריע בוודאות, מוכרע מחוץ למודל.**
 
@@ -164,6 +174,7 @@ The model, the engine and the logic all run on the machine running Home Assistan
 - **Several orders in one sentence.** "Turn off the kitchen light and close the bedroom blinds" is two commands and both run. The sentence is cut before the model sees it, and only where a new order really begins — "turn on the light in the living room and the kitchen" stays one order over two rooms.
 - **Plays music by name** through [Music Assistant](https://www.music-assistant.io/): the title, the artist and the kind are read out of the sentence, never invented by the model. Without Music Assistant installed it simply resumes playback on the room's speaker.
 - **A question cannot actuate.** Asking the state of a light answers; it does not switch it.
+- **The Hebrew verb decides the direction.** "נעל את הדלת" locks and "תנמיך את המזגן" lowers. Every model inverts a command sometimes, and that is the worst mistake a home assistant can make, so the words overrule it. Measured over the whole held-out set: **1337 times the words agree with the label, 0 times they contradict it.**
 - **Refuses** what is not about the house, and refuses negated commands.
 
 ## Requirements
@@ -178,22 +189,32 @@ Add `https://github.com/Yosef-Chai/needle-assist-he` as a HACS custom repository
 
 ## Measured
 
-On 400 unseen held-out rows, and across all 18,806 generated rows:
+On **all 2,379 rows** of the held-out test set, out of 22,520 generated:
 
 | | |
 |---|---|
-| correct tool | 66.8% |
-| tool **and** every argument | 44.2% |
-| multi-order sentences, correct tool set | **75.3%** (was 0.0%) |
-| music requests, correct tool at runtime | **86.2%** |
-| music requests, title read correctly from the sentence | **83 of 85** |
-| room resolution (in code, not in the model) | **99.0%** |
+| correct tool | **74.9%** |
+| tool **and** every argument | **55.7%** |
+| multi-order sentences, correct tool set | **95.3%** (was 0.0%) |
+| multi-order sentences, tools and arguments | **91.7%** |
+| mid-sentence self-correction ("no no, do...") | **100%** |
+| "the whole house" | **98.7%** |
+| lock and unlock, the right direction | **95.9%** |
+| direction read from the words: agrees / contradicts the label | **1337 / 0** |
+| sign of a relative change: agrees / contradicts | **1222 / 1** |
+| room resolution (in code, not in the model) | **99.5%** |
 | room resolution, synonyms never seen in training | **100%** |
 | tool shortlist recall | 99.1% |
-| questions given read-only tools only, so they cannot actuate | 82.0% |
-| real commands wrongly classified as questions | **0 of 15,709** |
+| questions given read-only tools only, so they cannot actuate | **84.4%** |
+| real commands wrongly classified as questions | **0 of 19,158** |
 | off-topic correctly refused | 75.0% |
 | real commands wrongly refused | 1.87% |
+
+**And how much of that is the model?** The same weights, the same questions,
+without the deterministic layer around them: **51.1%** correct tool instead of
+74.9%, **28.9%** exact instead of 55.7%, and **0.5%** correct refusal instead
+of 75.0%. Nearly half of what this system gets right, it gets right outside the
+model.
 
 Room resolution beats the model's own accuracy because it is not done by the model. The model knows twelve fixed English room slugs; a real house does not partition into twelve. So the room, the device name, the scene name and the notification text are read out of the sentence by deterministic code against Home Assistant's own registries. The same choice was made for tool selection and for refusal: **anything that can be decided with certainty is decided outside the model.**
 
