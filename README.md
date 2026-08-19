@@ -81,19 +81,105 @@
 
 **כינויים עוזרים.** אם קוראים לחדר "חדר הורים" אבל בבית אומרים "חדר שינה", תוסיף את זה כ‑alias לאזור. האינטגרציה קוראת את הכינויים ומתייחסת אליהם כמו לשם עצמו.
 
-**פקודה אחת במשפט.** משפטים עם שתי פקודות ("תדליק את האור **וגם** תסגור את התריס") עדיין לא עובדים — ראה מגבלות למטה.
+**כמה פקודות במשפט אחד עובדות.** "תכבה את האור בסלון ותנעל את הדלת" נחתך לשתי פקודות ומורץ אחת אחרי השנייה — 95.3% בחירת כלי נכונה על שורות כאלה. התקרה היא ארבע פקודות במשפט, כי כל אחת עולה בערך שתי שניות וחצי.
 
 ## אפשרויות
 
 **Settings ← Devices & services ← Needle Assist ← Configure**
 
+שתי הגדרות, ולא יותר:
+
 | הגדרה | ברירת מחדל | מה זה |
 |---|---|---|
-| סירוב לאמירות שאינן קשורות לבית | פעיל | בלי זה, שאלה על מזג האוויר בפריז עלולה להזיז מכשיר |
-| מקסימום טוקנים לאמירה | 192 | קריאת כלי היא כ‑25 טוקנים; העלאה לא משפרת כלום |
-| רף ביטחון | 0 | חייב להישאר 0 למודל מכוונן — ראה למטה |
+| **רמקול למוזיקה** | ריק | על איזה רמקול של Music Assistant לנגן כשלא נאמר חדר. מיותר אם יש רמקול אחד, או אם תמיד אומרים איפה |
+| **מקסימום טוקנים לאמירה** | 192 | קריאת כלי היא כ‑25 טוקנים; השאר נועד למשפטים עם כמה פקודות. העלאה לא משפרת את איכות התשובה — נמדד: 14 מתוך 28 כישלונות ב‑192, ואותם 14 ב‑768 |
 
-כל ברירת מחדל כאן היא הערך שנמדד כטוב ביותר, לא ניחוש.
+**מה שכבר לא ניתן לשינוי, בכוונה.** עד גרסה 1.2 היו כאן עוד שתי הגדרות — סירוב לאמירות שאינן קשורות לבית, ורף ביטחון מינימלי. לשתיהן יש ערך אחד נכון שנמדד, ולכן הן הפכו לקבועות בקוד:
+
+- **הסירוב פעיל תמיד.** המודל עצמו מסרב ב‑0.5% מהמקרים ומפעיל מכשיר ב‑99.5% מהשאלות שאינן קשורות לבית. הכיבוי היחיד שההגדרה אפשרה היה לתת לשאלה על כדורגל להדליק אור.
+- **רף הביטחון הוא 0.** הכיוונון לא מעדכן את ראש הביטחון של המנוע, וקריאות עברית נכונות נמדדות שם ב‑0.0. כל רף מעל אפס דחה פקודות תקינות.
+
+**נתיב למודל משלך.** אם אימנת מודל בעצמך: `⋮ ← הגדרה מחדש`, ושם נתיב לקובץ ‎.cact. השדה ריק פירושו המודל שמגיע עם האינטגרציה — וזה גם הדרך לחזור אליו.
+
+## למה זה טוב
+
+- **לדבר לבית בעברית, בלי ענן.** מיקרופון מקומי, מנוע מקומי — אף משפט לא יוצא מהבית. זה מה שמאפשר להתקין את זה בבית עם ילדים בלי לחשוב על זה פעמיים.
+- **עברית מדוברת, לא רק כתובה.** "תכבס", "שים על שקט", "תוריד קצת" — כולל מילים דבוקות ואותיות סופיות במקום הלא נכון, כמו שזיהוי דיבור מייצר.
+- **כמה פעולות במשפט אחד.** "תכבה את האור בסלון ותנעל את הדלת".
+- **מוזיקה בשם.** "תנגן את האלבום שבלול בסלון".
+- **לענות על שאלות בלי להזיז כלום.** "מה המצב של האור במטבח".
+- **מהיר.** כשתי שניות וחצי לפקודה על Home Assistant Green, בלי GPU ובלי חיבור לאינטרנט.
+
+## מה אפשר להפעיל
+
+אין כאן מכשירים משלה: היא מפעילה מה שכבר מותקן אצלך ב‑Home Assistant, דרך השירותים הרגילים. **42 כלים**, על התחומים האלה:
+
+| תחום | מה אפשר לומר |
+|---|---|
+| `light` | להדליק, לכבות, בהירות, אחוזים, למעלה ולמטה, צבע בשם |
+| `switch` | להדליק, לכבות |
+| `climate` | להדליק, לכבות, טמפרטורה מוחלטת, מצב, עוצמת מאוורר |
+| `cover` | לפתוח, לסגור, לעצור, אחוז פתיחה |
+| `lock` | לנעול, לשחרר |
+| `media_player` | לנגן, להשהות, ווליום, השתקה, שיר הבא, מקור |
+| `music_assistant` | לנגן אלבום/פלייליסט/רדיו/אמן בשם |
+| `vacuum` | להתחיל, לעצור, לחזור לתחנה, עוצמת שאיבה |
+| `fan` | להדליק, לכבות, סיבוב |
+| `camera` | לצלם תמונה |
+| `scene` / `script` / `automation` | להפעיל לפי שם |
+| `timer` | להפעיל, לבטל |
+| `input_boolean` / `input_number` | להדליק, לכבות, לקבוע ערך |
+| `notify` | לשלוח הודעה |
+| שאלות | מצב של ישות, טמפרטורה, מזג אוויר |
+
+**מה שלא נתמך בכוונה:** כל שירות שלא קיים ב‑Home Assistant. הדקדוק של המנוע בנוי מרשימת הכלים המוצהרת, כך שקריאה לכלי שלא הוצהר היא לא־ייצוגית — המודל לא *יכול* להמציא שירות.
+
+## דוגמאות
+
+**להריץ פקודה מאוטומציה** — למשל כפתור פיזי שאומר משפט:
+
+```yaml
+action:
+  - action: conversation.process
+    data:
+      agent_id: conversation.needle_assist
+      text: "תכבה את כל האורות ותנעל את הדלת"
+```
+
+**לבדוק מה האינטגרציה מבינה, בלי להפעיל כלום:**
+
+```yaml
+action:
+  - action: conversation.process
+    data:
+      agent_id: conversation.needle_assist
+      text: "מה המצב של האור במטבח"
+    response_variable: answer
+  - action: notify.persistent_notification
+    data:
+      message: "{{ answer.response.speech.plain.speech }}"
+```
+
+**להשתמש בה כעוזר הקולי של רמקול:** `Settings ← Voice assistants ← Add assistant`, ולבחור **Needle Assist** בתור Conversation agent. שפת ה‑pipeline צריכה להיות עברית.
+
+## איך זה מתעדכן
+
+אין כאן סקרים ואין רענון תקופתי. האינטגרציה קוראת את מצב הבית מהרישומים של Home Assistant **ברגע שמדברים אליה**, ולא לפני כן:
+
+- **חדרים וישויות** נקראים מרישום האזורים ומרישום הישויות בכל אמירה. חדר שהוספת או כינוי ששינית תופסים מיד — האינדקס נבנה מחדש באירוע השינוי.
+- **מצב מכשירים** נקרא מ‑`hass.states` באותו רגע, לצורך שאלות ולצורך פקודות יחסיות ("תעלה קצת" = המצב הנוכחי ועוד).
+- **המודל** נטען פעם אחת, בהפעלת האינטגרציה. שינוי הגדרות טוען אותו מחדש.
+- **ספריית המנוע** יורדת פעם אחת לכל גרסת מנוע, בהתקנה הראשונה. אחר כך אין שום קריאת רשת.
+
+## הסרה
+
+`Settings ← Devices & services ← Needle Assist ← ⋮ ← Delete`. אם התקנת דרך HACS, אפשר גם להסיר משם את המאגר.
+
+מה שנשאר אחרי מחיקה, ואפשר למחוק ידנית:
+
+- `/config/custom_components/needle_assist/` — האינטגרציה עצמה (HACS מוחקת אותה בשבילך).
+- `/config/needle_assist_engine/` — ספריית המנוע שירדה. אפשר למחוק; היא תרד שוב בהתקנה הבאה.
+- `/config/needle_he.cact` — רק אם העתקת לשם מודל בעצמך.
 
 ## מה נמדד
 
@@ -138,8 +224,8 @@
 - **חיתוך המשפט מסתמך על פועל.** "תדליק את האור בסלון, ובמטבח תסגור" — פועל שבא אחרי החדר במקום לפניו — לא תמיד ייחתך נכון. הניסוח הרגיל, פועל בתחילת כל פקודה, כן.
 - **מוזיקה בשם דורשת [Music Assistant](https://www.music-assistant.io/).** בלעדיו "תנגן לי כוורת" פשוט ימשיך נגינה על הרמקול שבחדר, כי אין ספרייה לחפש בה. שם השיר נקרא מהמשפט — המודל לא ממציא שמות ולא "יודע" באיזה אלבום שיר נמצא; החיפוש עצמו נעשה על ידי Music Assistant.
 - **שאלה בלי מילת שאלה לא תמיד מזוהה ככזו.** "התריס בסלון פתוח" בלי סימן שאלה עמום גם בעברית; כ‑18% מהשאלות נופלות לשם. הן לא יפעילו כלום בטעות, אבל הן עלולות לא לענות.
-- **המודל עצמו לא מסרב לכלום** — שיעור הסירוב הנכון שלו נמדד ב‑0.0%. הסירוב כולו נעשה בקוד, ותופס 75.0% מהאמירות שמחוץ לתחום. השאר יגיעו למודל.
-- **רף הביטחון לא שמיש.** הכיוונון לא מעדכן את ראש הביטחון של המנוע, וקריאות נכונות שאינן באנגלית נמדדו עם ביטחון 0.0. כל רף מעל 0 ידחה פקודות תקינות. לכן ברירת המחדל 0.
+- **המודל עצמו כמעט לא מסרב** — שיעור הסירוב הנכון שלו נמדד ב‑0.5%, והוא מפעיל מכשיר על 99.5% מהשאלות שאינן קשורות לבית. הסירוב כולו נעשה בקוד, ותופס 75.0% מהאמירות שמחוץ לתחום; השאר יגיעו למודל.
+- **רף הביטחון לא שמיש.** הכיוונון לא מעדכן את ראש הביטחון של המנוע, וקריאות נכונות שאינן באנגלית נמדדו עם ביטחון 0.0. כל רף מעל 0 ידחה פקודות תקינות — ולכן זה קבוע בקוד על 0 ולא הגדרה שאפשר לשנות.
 - **טקסט חופשי בארגומנט נלקח מהמשפט, לא מהמודל.** עברית מגיעה לארגומנט של כלי כרצף בריחה של שישה תווים לאות, והמודל טועה בהם. גוף ההתראה נחתך מהמשפט עצמו; אם אי אפשר לחתוך אותו — ההתראה לא נשלחת, במקום לשלוח ג'יבריש.
 - **ישות בלי אזור לא נגישה בפקודת חדר.** זו התנהגות של Home Assistant, לא באג כאן, אבל היא מפתיעה.
 - **עברית בלבד.** האינטגרציה מצהירה `he` ולא `MATCH_ALL`, כדי ש‑Assist לא ינתב אליה אנגלית.
@@ -152,7 +238,17 @@
 
 ## בעיות
 
-`Settings ← Devices & services ← Needle Assist ← ⋮ ← Download diagnostics` מייצר דוח עם מה שהאינטגרציה רואה: אילו חדרים היא זיהתה, כמה ישויות הן ברות‑פנייה, ומצב השערים. זה המקום להתחיל.
+`Settings ← Devices & services ← Needle Assist ← ⋮ ← Download diagnostics` מייצר דוח עם מה שהאינטגרציה רואה: איזה מודל נטען, אילו חדרים היא זיהתה ובאילו מילים אפשר לפנות לכל אחד, כמה ישויות ברות‑פנייה, ומצב השערים. הדוח לא מכיל אף משפט שאמרת. זה המקום להתחיל.
+
+| מה קורה | למה, בדרך כלל |
+|---|---|
+| **"לא הבנתי" על כל דבר** | ה‑pipeline לא מוגדר לעברית, או שנבחר עוזר שיחה אחר. `Settings ← Voice assistants` |
+| **פקודה תקינה לא מוצאת כלום** | לישות אין אזור. `Settings ← Devices & services ← Entities`, לסנן לפי ישויות בלי אזור |
+| **חדר מסוים אף פעם לא נתפס** | השם שאתם אומרים אינו שם האזור. להוסיף אותו כ‑alias לאזור; בדוח האבחון יש `reachable_by` לכל חדר, שמראה בדיוק אילו מילים מגיעות אליו |
+| **"תנגן X" רק ממשיך נגינה** | אין Music Assistant מותקן, או שהרמקול שלו אינו באזור שנאמר |
+| **האינטגרציה לא עולה אחרי עדכון** | דוח תיקון בשם "לא מוצא את קובץ המודל" — הרשומה מצביעה על קובץ שנמחק. `⋮ ← הגדרה מחדש`, ולרוקן את השדה |
+| **הפעלה ראשונה נכשלת בלי רשת** | ספריית המנוע יורדת פעם אחת. הודעת השגיאה כוללת את הכתובת ואת הנתיב, כדי להתקין ידנית |
+| **תשובה איטית מאוד** | כל פקודה במשפט היא ריצה נפרדת של המודל. משפט עם ארבע פקודות לוקח פי ארבעה |
 
 ## תודות ורישוי
 
@@ -189,6 +285,98 @@ Home Assistant 2024.11+, x86_64 or aarch64, glibc or musl, ~40MB of disk. No GPU
 Add `https://github.com/Yosef-Chai/needle-assist-he` as a HACS custom repository (category: Integration), install, restart, then **Settings → Devices & services → Add integration → Needle Assist (Hebrew) → Submit**. Nothing to fill in — the tuned model ships with the integration. Finally pick it as your conversation agent under **Settings → Voice assistants**.
 
 **Assign an area to every entity.** An entity with no area cannot be reached by any room command. That is Home Assistant's own targeting, but it surprises people.
+
+## Use cases
+
+- **Speak Hebrew to the house, with nothing in the cloud.** Local microphone, local engine; no sentence leaves the building.
+- **Spoken Hebrew, not only written Hebrew** - glued words and misplaced final letters, the way speech-to-text produces them.
+- **Several orders in one sentence** - "turn off the light in the living room and lock the door".
+- **Music by name** - "play the album Shablul in the living room".
+- **Questions that move nothing** - "is the light on in the kitchen".
+- **Fast**: about 2.5 s per order on a Home Assistant Green, with no GPU and no network.
+
+## Supported devices
+
+The integration owns no devices. It drives what Home Assistant already has, through the ordinary services - **42 tools** across these domains:
+
+`light`, `switch`, `climate`, `cover`, `lock`, `media_player`, `music_assistant`, `vacuum`, `fan`, `camera`, `scene`, `script`, `automation`, `timer`, `input_boolean`, `input_number`, `notify`, plus read-only questions about entity state, temperature and weather.
+
+Anything Home Assistant can do that is not in that list is *not* reachable, and cannot be reached by accident: the engine's grammar is compiled from the declared tool schemas, so a service that was never declared is not representable in the model's output.
+
+## Supported functions
+
+| Domain | What can be said |
+|---|---|
+| `light` | on, off, brightness, percentages, up and down, colour by name |
+| `climate` | on, off, absolute temperature, mode, fan speed |
+| `cover` | open, close, stop, position |
+| `media_player` | play, pause, volume, mute, next track, source |
+| `music_assistant` | play an album, playlist, radio station or artist by name |
+| `vacuum` | start, stop, return to dock, suction level |
+| `scene` / `script` / `automation` | run by name |
+| `timer` | start, cancel |
+| `notify` | send a message, whose text is taken from the sentence |
+
+## Examples
+
+Run a sentence from an automation - a physical button that speaks one, for instance:
+
+```yaml
+action:
+  - action: conversation.process
+    data:
+      agent_id: conversation.needle_assist
+      text: "תכבה את כל האורות ותנעל את הדלת"
+```
+
+Ask it something and use the answer, without actuating anything:
+
+```yaml
+action:
+  - action: conversation.process
+    data:
+      agent_id: conversation.needle_assist
+      text: "מה המצב של האור במטבח"
+    response_variable: answer
+  - action: notify.persistent_notification
+    data:
+      message: "{{ answer.response.speech.plain.speech }}"
+```
+
+To use it as a voice satellite's assistant, pick **Needle Assist** as the conversation agent under **Settings → Voice assistants**, with the pipeline language set to Hebrew.
+
+## How data is updated
+
+Nothing is polled and nothing is refreshed on a schedule. The house is read when the agent is spoken to and not before:
+
+- **Rooms and entities** come from the area and entity registries on each utterance; the compiled phrase index is invalidated by the registry-updated events, so a renamed room or a new alias takes effect immediately.
+- **Device state** is read from `hass.states` at that moment - for questions, and for relative orders, which are the current reading plus a step.
+- **The model** is loaded once at setup, and reloaded when an option changes.
+- **The engine's native library** is fetched once per engine version, on the first run, through Home Assistant's shared HTTP session. After that there is no network call at all.
+
+## Removal
+
+**Settings → Devices & services → Needle Assist → ⋮ → Delete**, then remove the repository from HACS if it was installed that way.
+
+Deleting the entry leaves three things on disk, all safe to remove by hand:
+
+- `/config/custom_components/needle_assist/` - the integration (HACS removes this for you).
+- `/config/needle_assist_engine/` - the downloaded engine; it is fetched again if the integration is reinstalled.
+- `/config/needle_he.cact` - only if you copied a model there yourself.
+
+## Troubleshooting
+
+**Settings → Devices & services → Needle Assist → ⋮ → Download diagnostics** reports which model loaded, every area with the exact phrases that reach it, how many entities are addressable, and the gate thresholds. It contains no utterance of yours. Start there.
+
+| Symptom | Usually |
+|---|---|
+| Everything answers "I did not understand" | The pipeline is not set to Hebrew, or another conversation agent is selected |
+| A valid order finds nothing | The entity has no area. Filter for area-less entities under Settings → Devices & services → Entities |
+| One room is never recognised | The word you say is not the area's name. Add it as an area alias; `reachable_by` in the diagnostics shows exactly which words reach each room |
+| "Play X" only resumes playback | Music Assistant is not installed, or its player is not in the room that was named |
+| It stops loading after an update | A repair issue named "cannot find its model file" - the entry points at a file that was deleted. Use ⋮ → Reconfigure and clear the field |
+| First start fails with no network | The engine library is fetched once; the error names the URL and the path so it can be installed by hand |
+| Very slow answers | Each order in a sentence is a separate run of the model; four orders take four times as long |
 
 ## Measured
 
@@ -232,8 +420,8 @@ See [`docs/HOW-IT-WORKS.md`](docs/HOW-IT-WORKS.md).
 - **Cutting the sentence relies on a verb.** An order whose verb comes after the room rather than before it may not be separated. The ordinary phrasing, a verb at the head of each order, is.
 - **Playing music by name needs [Music Assistant](https://www.music-assistant.io/).** Without it, a request to play something resumes the room's speaker instead, because there is no library to search. The title comes out of the sentence; nothing here tries to *know* which album a song is on — Music Assistant does the lookup.
 - **A question with no interrogative** ("the blind in the living room [is] open") is not always recognised as one. It cannot actuate by accident, but it may not answer.
-- **The model itself never refuses anything** — 0.0% correct refusal measured. Refusal is done in code and catches 75.0% of off-topic utterances.
-- **The confidence threshold is unusable.** Fine-tuning does not update the engine's confidence head and correct non-English calls measure 0.0, so any threshold above 0 rejects valid commands. Hence the default of 0.
+- **The model itself almost never refuses anything** — 0.5% correct refusal measured, and 99.5% false actuation. Refusal is done in code and catches 75.0% of off-topic utterances; the rest reach the model.
+- **The confidence threshold is unusable.** Fine-tuning does not update the engine's confidence head and correct non-English calls measure 0.0, so any threshold above 0 rejects valid commands. It is a constant of 0 rather than a setting, for that reason.
 - **Free-text arguments come from the sentence, not the model.** Hebrew reaches a tool argument as six-character escapes and the model gets them wrong.
 - **Hebrew only.** The integration declares `he` rather than `MATCH_ALL`.
 

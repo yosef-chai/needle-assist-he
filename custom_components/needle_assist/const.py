@@ -18,9 +18,20 @@ DOMAIN: Final = "needle_assist"
 BUNDLED_WEIGHTS: Final = Path(__file__).parent / "needle_he.cact"
 
 CONF_WEIGHTS: Final = "weights_path"
-CONF_CONFIDENCE: Final = "min_confidence"
 CONF_MAX_TOKENS: Final = "max_new_tokens"
-CONF_REFUSE_GATE: Final = "refuse_off_topic"
+
+# The shape of what the config entry stores. Version 2 removed two options, so
+# an entry written by version 1 is migrated on load rather than left carrying
+# keys nothing reads. See `__init__.async_migrate_entry`.
+ENTRY_VERSION: Final = 2
+
+# The keys that migration strips. Both used to be dialog fields and are now
+# fixed policy; they are named here only so the migration can find them.
+RETIRED_OPTIONS: Final = ("min_confidence", "refuse_off_topic")
+
+# Repair issue id, raised when a weights path the household typed in has since
+# gone missing. One id, reused, so the repair closes itself when setup succeeds.
+ISSUE_WEIGHTS_MISSING: Final = "weights_file_missing"
 
 # Which speaker plays music when the sentence names no room. Optional, and
 # only meaningful with Music Assistant installed. A house with exactly one
@@ -31,24 +42,16 @@ CONF_MUSIC_PLAYER: Final = "music_player"
 
 DEFAULT_MAX_TOKENS: Final = 192
 
-# The deterministic off-topic gate is ON by default, unlike confidence gating.
-#
-# It rests on a measurement rather than on a head the fine-tune never updates:
-# across v5-v8 the model's correct-refusal rate is 0.0% and its false-actuation
-# rate ~100%, while the router's family score puts 73.9% of off-topic
-# utterances below 3 and 96.7% of genuine commands at or above it. See
-# tool_router.looks_off_topic. Turn it off to let the model answer everything.
-DEFAULT_REFUSE_GATE: Final = True
-
-# Confidence gating is OFF by default and that is deliberate.
+# Confidence gating is off, and that is policy rather than a default.
 #
 # Needle's own finetuning guide states the confidence head "is calibrated for
 # the base model on its training mix and finetuning does not update the head,
 # so the package disables them for tuned weights", and separately that correct
-# non-English calls have been measured at confidence 0.0. Gating on it would
-# reject every correct Hebrew call. The option exists for anyone running the
-# untuned base model in English.
-DEFAULT_CONFIDENCE: Final = 0.0
+# non-English calls have been measured at confidence 0.0. Any floor above zero
+# would reject every correct Hebrew call. That is why this is a constant and
+# not a slider: there is no value a household could usefully move it to, and
+# the slider that used to be here could only break a working assistant.
+CONFIDENCE_FLOOR: Final = 0.0
 
 # Whole-home marker. The model is fine-tuned to emit this for "בכל הבית".
 # It is deliberately distinguishable from an ABSENT area, which means

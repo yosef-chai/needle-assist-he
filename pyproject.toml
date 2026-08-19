@@ -1,0 +1,67 @@
+# Tooling configuration. There is no package to build here - a Home Assistant
+# custom integration is copied into `custom_components/`, not pip-installed -
+# so this file exists only to pin how the checks run.
+
+[tool.pytest.ini_options]
+# `pytest-homeassistant-custom-component` ships autouse async fixtures, which
+# a synchronous test cannot request under strict mode. The Hebrew logic suite
+# is synchronous and the Home Assistant suite is not, so both live here only
+# because the mode is automatic.
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# The repository root, so `custom_components.needle_assist` imports the
+# integration the way Home Assistant does when it loads it from /config.
+pythonpath = ["."]
+
+[tool.mypy]
+# The Platinum tier's strict-typing rule, as Home Assistant core applies it to
+# its own strictly-typed integrations.
+python_version = "3.14"
+strict = true
+follow_imports = "silent"
+warn_unreachable = true
+enable_error_code = [
+    "ignore-without-code",
+    "redundant-self",
+    "truthy-iterable",
+]
+disable_error_code = ["annotation-unchecked"]
+# `needle_engine/` is the Needle 2 inference engine, vendored verbatim from
+# upstream and kept byte-identical so it can be diffed against the release it
+# came from - see custom_components/needle_assist/needle_engine/VENDOR.md.
+# Annotating it would fork it, so it is treated the way an untyped third-party
+# wheel is treated. Every call that crosses into it names its own return type
+# on the calling line, so no `Any` escapes the boundary.
+exclude = ["custom_components/needle_assist/needle_engine/"]
+
+[[tool.mypy.overrides]]
+# The same directory, named the two ways mypy may resolve it depending on
+# whether it treats `custom_components` as a namespace package.
+module = [
+    "needle_assist.needle_engine.*",
+    "custom_components.needle_assist.needle_engine.*",
+]
+ignore_errors = true
+follow_imports = "skip"
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+# The set Home Assistant core enforces on integrations. The pylint refactor
+# rules (PLR*) are deliberately absent: core does not gate on them, and the
+# router's branch count is the shape of the problem rather than a smell.
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RET", "ASYNC", "PLC0415",
+          "PLE", "PLW"]
+
+[tool.ruff.lint.per-file-ignores]
+# Vendored upstream code is not ours to restyle.
+"custom_components/needle_assist/needle_engine/*" = ["ALL"]
+
+[tool.coverage.run]
+source = ["custom_components/needle_assist"]
+omit = [
+    # Vendored upstream engine, covered by its own project's tests.
+    "custom_components/needle_assist/needle_engine/*",
+]

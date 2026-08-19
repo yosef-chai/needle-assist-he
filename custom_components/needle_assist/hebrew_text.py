@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Hebrew phrase matching, with no Home Assistant and no model in sight.
 
 This module answers one question: *does any of these Hebrew phrases appear in
@@ -39,8 +38,8 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Final
 
 # Hebrew points, accents and cantillation. Nobody types these at an assistant,
@@ -65,7 +64,7 @@ _PUNCT: Final = str.maketrans({
 # that reading does not exist: the article can only come last.
 _PREFIX_LETTERS: Final = "ובהלכמש"
 _PREFIX_CHAIN: Final = "(?:ו)?(?:כש|ש)?(?:[בלכמ])?(?:ה)?"
-_PREFIX_REQUIRED: Final = "(?=[%s])%s" % (_PREFIX_LETTERS, _PREFIX_CHAIN)
+_PREFIX_REQUIRED: Final = f"(?=[{_PREFIX_LETTERS}]){_PREFIX_CHAIN}"
 
 # The same chain, anchored, with the preposition captured. ב/ל/מ/כ are the
 # locative ones - "in the", "to the", "from the" - and their presence is the
@@ -163,7 +162,11 @@ def locative(token: str) -> bool:
     ``במתבח``, ``בממדד``, ``במשרדד`` - and requiring one throws out the
     ordinary-word collisions while keeping every typo the corpus contains.
     """
-    return bool(_CHAIN_AT_START.match(token).group(1))
+    # Every group in the pattern is optional and it is anchored at ^, so the
+    # match can only succeed - possibly with zero length. Written as a guard
+    # rather than an assertion so the invariant survives python -O.
+    match = _CHAIN_AT_START.match(token)
+    return bool(match and match.group(1))
 
 
 def _near(window: str, needle: str, budget: int) -> bool:
@@ -173,7 +176,8 @@ def _near(window: str, needle: str, budget: int) -> bool:
     ``הוו`` off ``הווילון`` leaves ``ילון``, one edit from ``סלון``, and no
     Hebrew reading of the word supports it.
     """
-    chain = _CHAIN_AT_START.match(window).end()
+    match = _CHAIN_AT_START.match(window)
+    chain = match.end() if match else 0
     for start in {0, chain}:
         if _distance(window[start:], needle, budget) <= budget:
             return True
@@ -217,8 +221,8 @@ class PhraseIndex:
     """
 
     def __init__(self) -> None:
-        self._strict: list[tuple[re.Pattern, str, str, int, int]] = []
-        self._glued: list[tuple[re.Pattern, str, str, int, int]] = []
+        self._strict: list[tuple[re.Pattern[str], str, str, int, int]] = []
+        self._glued: list[tuple[re.Pattern[str], str, str, int, int]] = []
         self._despaced: list[tuple[tuple[str, ...], str, str, int, int]] = []
         self._fuzzy: list[tuple[list[str], str, str, int, int]] = []
         self._seen: set[tuple[str, str]] = set()
@@ -234,7 +238,7 @@ class PhraseIndex:
 
         strength = len(norm)
         self._strict.append((
-            re.compile("(?<![%s])%s(?![%s])" % (_LETTER, _body(words), _LETTER)),
+            re.compile(f"(?<![{_LETTER}]){_body(words)}(?![{_LETTER}])"),
             value, norm, strength, tier))
 
         # The glued pass gives up the left boundary, so it needs a different
@@ -249,7 +253,7 @@ class PhraseIndex:
         # three-letter room names out of a pass that cannot fence them.
         if len("".join(words)) >= 4:
             self._glued.append((
-                re.compile("%s(?![%s])" % (_body(words, prefix_min=1), _LETTER)),
+                re.compile(f"{_body(words, prefix_min=1)}(?![{_LETTER}])"),
                 value, norm, strength, tier))
 
         # Both spellings go in: the article is stripped for regex matching, but

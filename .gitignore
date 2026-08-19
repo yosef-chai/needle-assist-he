@@ -6,3 +6,9 @@ __pycache__/
 .idea/
 .vscode/
 .pytest_cache/
+
+# Coverage output
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/

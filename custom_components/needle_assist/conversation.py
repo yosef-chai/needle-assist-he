@@ -12,26 +12,42 @@ Everything runs on the local machine. No network call is made at any point.
 from __future__ import annotations
 
 import logging
-from typing import Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 from homeassistant.components import conversation
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import (
     area_registry as ar,
+)
+from homeassistant.helpers import (
     entity_registry as er,
+)
+from homeassistant.helpers import (
     intent,
 )
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import clause_split, reply, tool_router
 from .const import (
-    CONF_CONFIDENCE, CONF_MAX_TOKENS, CONF_REFUSE_GATE, DEFAULT_CONFIDENCE,
-    DEFAULT_MAX_TOKENS, DEFAULT_REFUSE_GATE, DOMAIN, SPEECH_NOTHING,
+    CONF_MAX_TOKENS,
+    CONFIDENCE_FLOOR,
+    DEFAULT_MAX_TOKENS,
+    DOMAIN,
+    SPEECH_NOTHING,
 )
 from .executor import CallExecutor, CallOutcome
+from .needle_engine.agent import fetch
+
+if TYPE_CHECKING:
+    from . import NeedleConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
+
+# Nothing here polls or pushes state: a conversation entity answers when it is
+# spoken to. The engine serialises itself behind its own lock, so there is no
+# second limit worth imposing here.
+PARALLEL_UPDATES = 0
 
 # Stands in for the tool name on a clause the engine never got through, so
 # that a failure there is counted alongside the calls that did run.
@@ -40,7 +56,7 @@ ENGINE: Final = "engine failure"
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: NeedleConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the conversation entity."""
@@ -51,16 +67,30 @@ class NeedleConversationEntity(conversation.ConversationEntity):
     """Hebrew intent handler backed by a fine-tuned Needle 2."""
 
     _attr_has_entity_name = True
-    _attr_name = "Needle Assist"
+    # None, not a string: the entity is the whole of what the device does, so
+    # it takes the device's name rather than carrying an untranslatable one of
+    # its own. See the device below.
+    _attr_name = None
     _attr_should_poll = False
     _attr_supported_features = conversation.ConversationEntityFeature.CONTROL
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+    def __init__(self, hass: HomeAssistant, entry: NeedleConfigEntry) -> None:
         self.hass = hass
         self.entry = entry
-        self._runner = hass.data[DOMAIN][entry.entry_id]
+        self._runner = entry.runtime_data
         self._executor = CallExecutor(hass, entry)
         self._attr_unique_id = entry.entry_id
+        # A service device, not a hardware one - there is no box to find in the
+        # house. It exists so the engine has somewhere to report its version,
+        # and so the agent can be addressed as a device like any other.
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            entry_type=DeviceEntryType.SERVICE,
+            manufacturer="Needle Assist",
+            model="Needle 2, Hebrew adapter",
+            name="Needle Assist",
+            sw_version=fetch.ENGINE_VERSION,
+        )
 
     async def async_added_to_hass(self) -> None:
         """Keep the slot resolver's view of the house current.
@@ -72,10 +102,16 @@ class NeedleConversationEntity(conversation.ConversationEntity):
         on the next utterance after a change.
         """
         await super().async_added_to_hass()
+
+        @callback
+        def _house_changed(_event: Event[Any]) -> None:
+            """Drop the compiled phrase index; the next utterance rebuilds it."""
+            self._executor.slots.invalidate()
+
         for event in (ar.EVENT_AREA_REGISTRY_UPDATED,
                       er.EVENT_ENTITY_REGISTRY_UPDATED):
             self.async_on_remove(
-                self.hass.bus.async_listen(event, self._executor.slots.invalidate)
+                self.hass.bus.async_listen(event, _house_changed)
             )
 
     @property
@@ -100,16 +136,22 @@ class NeedleConversationEntity(conversation.ConversationEntity):
         # float, max_new_tokens reaches a ctypes call, and a selector wrapped in
         # vol.All does not reliably survive the frontend's schema serialisation.
         max_tokens = int(options.get(CONF_MAX_TOKENS, DEFAULT_MAX_TOKENS))
-        min_conf = float(options.get(CONF_CONFIDENCE, DEFAULT_CONFIDENCE))
+        min_conf = CONFIDENCE_FLOOR
 
-        # Refuse before inference, not after. The model's own refusal rate is
-        # 0.0% and its false-actuation rate is ~100%, so left to itself it will
-        # call a tool on "מי ניצח במשחק אתמול". The router's family score
-        # already separates the two classes - see tool_router.looks_off_topic
-        # for the measurement and the threshold. Running the gate first also
-        # skips a 45M-parameter forward pass on utterances no tool serves.
-        if options.get(CONF_REFUSE_GATE, DEFAULT_REFUSE_GATE) and \
-                tool_router.looks_off_topic(user_input.text):
+        # Refuse before inference, not after, and unconditionally. The model's
+        # own refusal rate is 0.0% and its false-actuation rate is ~100%, so
+        # left to itself it will call a tool on "מי ניצח במשחק אתמול". The
+        # router's family score already separates the two classes - it puts
+        # 73.9% of off-topic utterances below the threshold and keeps 96.7% of
+        # genuine commands at or above it; see tool_router.looks_off_topic for
+        # the measurement. Running the gate first also skips a 45M-parameter
+        # forward pass on utterances no tool serves.
+        #
+        # This was a switch in the options dialog until entry version 2.
+        # Nothing measured ever argued for turning it off, and the only thing
+        # the switch could do for a household was let a question about football
+        # move a light, so it became policy rather than a preference.
+        if tool_router.looks_off_topic(user_input.text):
             _LOGGER.debug("refused off-topic before inference: %r", user_input.text)
             response.async_set_speech(SPEECH_NOTHING)
             return conversation.ConversationResult(

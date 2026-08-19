@@ -1,0 +1,217 @@
+# Home Assistant Integration Quality Scale.
+#
+# The scale is a core-repository process: the tier is declared in a core
+# integration's manifest and validated by hassfest, and a custom integration
+# cannot be awarded one. What it can do is meet the rules, which is what this
+# file records - every rule of every tier, with the evidence or the reason.
+#
+# Verified on Home Assistant 2026.8.2 / Python 3.14:
+#
+#   ruff check custom_components/needle_assist          - clean
+#   mypy custom_components/needle_assist                - clean, --strict
+#   pytest tests --cov                                  - 225 passed, 95%
+#   pytest tests/ha/test_config_flow.py --cov=...config_flow  - 100%
+#
+rules:
+  # ---------------------------------------------------------------- Bronze
+  action-setup:
+    status: exempt
+    comment: The integration registers no service actions. It contributes a
+      conversation agent; everything it does, it does by calling other
+      integrations' actions.
+  appropriate-polling:
+    status: exempt
+    comment: Nothing polls. A conversation entity answers when it is spoken to,
+      and the house's state is read from the registries at that moment.
+  brands:
+    status: done
+    comment: The eight brand images ship in `brand/`, which core's `brands`
+      integration serves for custom integrations at
+      /api/brands/integration/needle_assist/. The same files are staged under
+      `brands/` in the repository root for the home-assistant/brands pull
+      request, which is what a core integration would use instead.
+  common-modules:
+    status: done
+    comment: The Hebrew logic lives in named modules used by both the agent and
+      the corpus generator - `hebrew_text`, `slot_match`, `tool_router`,
+      `clause_split`, `direction`. There is no coordinator because nothing
+      polls.
+  config-flow-test-coverage:
+    status: done
+    comment: 100% of config_flow.py, in tests/ha/test_config_flow.py.
+  config-flow: done
+  dependency-transparency:
+    status: done
+    comment: '`requirements` is empty. The inference engine is vendored under
+      needle_engine/, byte-identical to its upstream release and documented in
+      needle_engine/VENDOR.md; its native library is fetched once from the
+      pinned upstream release and never again.'
+  docs-actions:
+    status: exempt
+    comment: No service actions to document.
+  docs-triggers:
+    status: exempt
+    comment: The integration provides no triggers.
+  docs-conditions:
+    status: exempt
+    comment: The integration provides no conditions.
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions: done
+  entity-event-setup:
+    status: done
+    comment: The area and entity registry listeners are subscribed in
+      `async_added_to_hass` and removed through `async_on_remove`.
+  entity-unique-id: done
+  has-entity-name:
+    status: done
+    comment: '`_attr_has_entity_name` is true and `_attr_name` is None, so the
+      entity takes the name of its device.'
+  runtime-data:
+    status: done
+    comment: The loaded engine is `entry.runtime_data`, typed through
+      `NeedleConfigEntry = ConfigEntry[NeedleRunner]`.
+  test-before-configure:
+    status: done
+    comment: There is no service to connect to - the model is a file on disk -
+      so the config flow validates that file instead: that the path resolves,
+      and that it is a `.cact` archive rather than a training checkpoint.
+      Both errors are shown in the dialog.
+  test-before-setup:
+    status: done
+    comment: Setup fetches the engine and loads the weights, and raises
+      ConfigEntryNotReady if either fails. A configured weights file that has
+      gone missing raises a repair issue instead, because retrying cannot fix
+      it.
+  unique-config-entry:
+    status: done
+    comment: '`single_config_entry` in the manifest, and the flow sets a unique
+      id. One house has one Hebrew assistant.'
+
+  # ---------------------------------------------------------------- Silver
+  action-exceptions:
+    status: exempt
+    comment: No service actions.
+  config-entry-unloading: done
+  docs-configuration-parameters: done
+  docs-installation-parameters: done
+  entity-unavailable:
+    status: exempt
+    comment: There is nothing to be disconnected from. The engine runs in this
+      process; if it cannot load, the entry does not set up, which is a
+      different thing from an entity being unavailable.
+  integration-owner:
+    status: done
+    comment: See `codeowners` in the manifest.
+  log-when-unavailable:
+    status: exempt
+    comment: Same reason as entity-unavailable - there is no connection whose
+      loss and recovery could be logged.
+  parallel-updates:
+    status: done
+    comment: '`PARALLEL_UPDATES = 0` in conversation.py. Nothing polls or
+      pushes; the engine serialises itself behind its own lock.'
+  reauthentication-flow:
+    status: exempt
+    comment: Nothing is authenticated. The integration makes no request to any
+      service, and holds no credential.
+  test-coverage:
+    status: done
+    comment: 95% over the integration, 225 tests. The vendored engine is
+      excluded, as an upstream dependency with its own tests.
+
+  # ------------------------------------------------------------------ Gold
+  devices:
+    status: done
+    comment: A service device for the engine, carrying its version, which the
+      conversation entity belongs to. There is no hardware to represent.
+  diagnostics:
+    status: done
+    comment: Reports the loaded model, the tool catalogue, every area with the
+      phrases that reach it, and the gate thresholds - enough to answer "why
+      did it not find my room" without a debug log. It contains no utterance
+      and no personal data.
+  discovery-update-info:
+    status: exempt
+    comment: Nothing is discovered, so there is no network information to keep
+      up to date.
+  discovery:
+    status: exempt
+    comment: There is nothing on the network to find. The integration is a
+      model file and a native library on the Home Assistant machine itself.
+  docs-data-update: done
+  docs-examples: done
+  docs-known-limitations: done
+  docs-supported-devices: done
+  docs-supported-functions: done
+  docs-troubleshooting: done
+  docs-use-cases: done
+  dynamic-devices:
+    status: exempt
+    comment: The one service device is created with the entry. No device can
+      appear later, because none is discovered in the first place.
+  entity-category:
+    status: exempt
+    comment: The conversation entity is the integration's primary feature, not
+      configuration or diagnostics, so it takes no category.
+  entity-device-class:
+    status: exempt
+    comment: Conversation entities have no device classes.
+  entity-disabled-by-default:
+    status: exempt
+    comment: There is one entity and it is the reason the integration exists.
+  entity-translations:
+    status: done
+    comment: The entity has no name of its own - `_attr_name` is None - so it
+      takes the device's, and there is no untranslated string to translate.
+      The user-facing text that does exist (the flows, the errors, the repair)
+      is translated into English and Hebrew.
+  exception-translations:
+    status: exempt
+    comment: No exception reaches a user. The integration exposes no service
+      action to raise from, and a failed command is spoken back in Hebrew
+      through the conversation response rather than raised.
+  icon-translations:
+    status: exempt
+    comment: No icon is set in Python, so the conversation platform's own icon
+      applies and there is nothing to move into icons.json.
+  reconfiguration-flow:
+    status: done
+    comment: Added in version 1.3.0. Without it a weights path typed once could
+      never be cleared, and an update that replaced the bundled model left the
+      old file loading forever - which is exactly what happened on the author's
+      own installation.
+  repair-issues:
+    status: done
+    comment: One issue, `weights_file_missing`, raised when a configured model
+      file has gone. Retrying cannot bring it back, so it asks the household to
+      reconfigure and names the file; it clears itself when setup succeeds.
+  stale-devices:
+    status: exempt
+    comment: The single service device belongs to the entry and goes with it.
+
+  # -------------------------------------------------------------- Platinum
+  async-dependency:
+    status: exempt
+    comment: The Needle 2 engine is a native library called through ctypes -
+      synchronous by construction, and not something a Python wrapper can make
+      otherwise. Every call into it runs in an executor
+      (`hass.async_add_executor_job`), and the engine serialises itself behind
+      a lock, so the event loop is never blocked. This is the only rule of the
+      four tiers whose exemption is a property of the dependency rather than of
+      the problem.
+  inject-websession:
+    status: done
+    comment: The integration makes exactly one network call ever - fetching the
+      engine's native library for this architecture, once per engine version on
+      a fresh install - and it goes through
+      `homeassistant.helpers.aiohttp_client.async_get_clientsession`, so it
+      inherits the instance's proxy settings, SSL context and connection pool.
+      Everything afterwards is local.
+  strict-typing:
+    status: done
+    comment: '`mypy --strict` is clean over the sixteen modules, against Home
+      Assistant 2026.8.2 on Python 3.14; the settings are in pyproject.toml and
+      `py.typed` is shipped. The vendored engine is excluded the way an untyped
+      third-party wheel would be, and every call that crosses into it names its
+      own return type on the calling line, so no `Any` escapes the boundary.'

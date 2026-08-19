@@ -132,7 +132,7 @@ measurement rather than by reading:
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Any, Final
 
 from .clause_split import CORRECTION
 from .tool_router import TOOL_HINTS, _fold, _hits, _tokens
@@ -223,7 +223,7 @@ def which_way(text: str) -> int | None:
     return None
 
 
-def settle_steps(arguments: dict, text: str) -> dict:
+def settle_steps(arguments: dict[str, Any], text: str) -> dict[str, Any]:
     """``arguments`` with the sign of any relative argument corrected.
 
     Nothing is added, nothing is removed and no magnitude changes: an argument

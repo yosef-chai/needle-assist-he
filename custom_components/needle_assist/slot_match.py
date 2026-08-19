@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Resolve the slots the model should never have been asked to fill.
 
 The model's job is to choose a tool and fill the *typed* arguments - a
@@ -46,8 +45,8 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any, Final
 
 from .area_map import AREA_ALIASES, slug_for_name
@@ -181,7 +180,7 @@ def extract_message(utterance: str) -> str | None:
 # feature came from - the difference is that the automation hands the sentence
 # to a cloud LLM to turn into JSON, and this does it here, offline.
 _LISTEN_VERBS: Final = frozenset(
-    "האזין האזן האזני תאזין תאזיני".split())
+    ["האזין", "האזן", "האזני", "תאזין", "תאזיני"])
 
 _MUSIC_VERB: Final = re.compile(
     # Anywhere in the sentence, not only at the head. Israelis wrap an order in
@@ -263,13 +262,14 @@ for _word in ("משהו", "טוב", "טובה", "נחמד", "נעים", "כיף"
               "מוסיקה", "קצת", "עוד", "שיר", "שירים"):
     _VAGUE.add(_word, "vague")
 
-_NOT_A_NAME: Final = frozenset(
-    "הזה הזאת הזו זה זאת אותו אותה משהו מוזיקה מוסיקה שיר שירים את ה קצת עוד "
+_NOT_A_NAME: Final = frozenset((
+    "הזה", "הזאת", "הזו", "זה", "זאת", "אותו", "אותה", "משהו", "מוזיקה",
+    "מוסיקה", "שיר", "שירים", "את", "ה", "קצת", "עוד",
     # Transport control wearing a title's clothes: "play the next song" leaves
     # "הבא" behind once the kind word is consumed, and searching a library for
     # "the next" finds nothing.
-    "הבא הקודם הבאה הקודמת אחרון אחרונה".split()
-)
+    "הבא", "הקודם", "הבאה", "הקודמת", "אחרון", "אחרונה",
+))
 
 
 @dataclass(frozen=True)
@@ -747,7 +747,7 @@ class SlotIndex:
 
 
     # -- introspection ------------------------------------------------------
-    def describe(self) -> dict:
+    def describe(self) -> dict[str, Any]:
         """What this installation looks like to the resolver.
 
         Surfaced through the diagnostics platform, because the two questions a

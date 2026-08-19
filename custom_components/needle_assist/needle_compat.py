@@ -28,23 +28,25 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
 
 _warned = False
 
 
-def safe_complete(agent, text: str, max_new_tokens: int = 192) -> dict:
+def safe_complete(agent: Any, text: str,
+                  max_new_tokens: int = 192) -> dict[str, Any]:
     """One turn, surviving truncated multi-byte characters in the response."""
-    global _warned
+    global _warned  # noqa: PLW0603 - one debug line, once per process
     # The vendored engine, not the installed `cactus-needle`. Home Assistant has
     # no `needle` on its path - the package is deliberately not a requirement,
     # see needle_engine/VENDOR.md - and importing it here would work on a
     # developer machine and fail only on the device.
-    from . import needle_engine as needle
+    from . import needle_engine as needle  # noqa: PLC0415
 
     agent._bind()
-    rc = needle._lib().needle_complete(
+    rc: int = needle._lib().needle_complete(
         text.encode("utf-8"), int(max_new_tokens), agent._buffer, len(agent._buffer)
     )
     if rc < 0:
@@ -64,7 +66,7 @@ def safe_complete(agent, text: str, max_new_tokens: int = 192) -> dict:
             _warned = True
 
     try:
-        response = json.loads(payload)
+        response: dict[str, Any] = json.loads(payload)
     except json.JSONDecodeError as err:
         raise RuntimeError(
             f"engine returned an unparseable envelope ({err})"

@@ -13,10 +13,14 @@ needs the real :class:`executor.CallOutcome`.
 
 from __future__ import annotations
 
-from typing import Final, NamedTuple
+from collections.abc import Sequence
+from typing import Final, NamedTuple, Protocol
 
 from .const import (
-    SPEECH_FAILED, SPEECH_NOTHING, SPEECH_NO_TARGET, SPEECH_OK,
+    SPEECH_FAILED,
+    SPEECH_NO_TARGET,
+    SPEECH_NOTHING,
+    SPEECH_OK,
 )
 
 #: ``CallOutcome.detail`` for a call that found nothing to act on. Every other
@@ -53,7 +57,30 @@ def failures(count: int) -> str:
     return _FAILURES.get(count, f"{count} פעולות נכשלו")
 
 
-def compose(outcomes, engine_error: str | None = None) -> Reply:
+class Outcome(Protocol):
+    """The three fields of an executor result this module reads.
+
+    A structural type, not an import: `executor.CallOutcome` satisfies it, but
+    importing that module would drag Home Assistant in behind it, and keeping
+    this file free of Home Assistant is the reason it exists separately from
+    :mod:`conversation`.
+    """
+
+    @property
+    def ok(self) -> bool:
+        """Did the call do what it was asked to."""
+
+    @property
+    def speech(self) -> str | None:
+        """What to say about it, if anything."""
+
+    @property
+    def detail(self) -> str:
+        """Why it failed, machine-readable, empty when it did not."""
+
+
+def compose(outcomes: Sequence[Outcome],
+            engine_error: str | None = None) -> Reply:
     """The spoken reply for one utterance.
 
     ``engine_error`` is the first engine-level failure, if any; it is only

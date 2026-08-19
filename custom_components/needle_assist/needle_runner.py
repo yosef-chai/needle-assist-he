@@ -63,7 +63,7 @@ class NeedleRunner:
         # It is one small file and it would work, but the loop belongs to every
         # other integration too. load() runs in an executor; the read goes
         # there.
-        self._tools: list[dict] = []
+        self._tools: list[dict[str, Any]] = []
 
     def load(self) -> None:
         """Read the catalogue, point the engine at its library, warm one agent.
@@ -102,6 +102,16 @@ class NeedleRunner:
             self._weights or "baked-in base model",
         )
 
+    @property
+    def weights(self) -> str | None:
+        """The weights file actually in use, once :meth:`load` has run.
+
+        ``None`` only when no tuned weights were found at all, which means the
+        untuned base model - it does not understand Hebrew, so anything reading
+        this should say so plainly rather than call it a default.
+        """
+        return self._weights
+
     # The router can only emit shortlists built from the tool families, so the
     # key space is small in practice. The bound is a safety net against a
     # pathological input stream, not an expected condition.
@@ -127,7 +137,7 @@ class NeedleRunner:
         self._agents[key] = agent
         return agent
 
-    def complete(self, text: str, max_new_tokens: int = 192) -> dict:
+    def complete(self, text: str, max_new_tokens: int = 192) -> dict[str, Any]:
         """One turn. Returns Needle's response dict. Blocking."""
         if self._needle is None:
             raise RuntimeError("NeedleRunner.load() was not called")
@@ -155,7 +165,7 @@ class NeedleRunner:
         return result
 
     @staticmethod
-    def calls_of(result: dict) -> list[dict]:
+    def calls_of(result: dict[str, Any]) -> list[dict[str, Any]]:
         """Tool calls from a response, normalised to a list.
 
         Needle's refusal for off-topic input is an EMPTY call list, not an
@@ -166,7 +176,7 @@ class NeedleRunner:
         return [c for c in calls if isinstance(c, dict) and c.get("name")]
 
     @staticmethod
-    def failed(result: dict) -> str | None:
+    def failed(result: dict[str, Any]) -> str | None:
         """Engine-level failure message, or None if the turn was fine.
 
         An empty ``function_calls`` is ambiguous on its own: it is both the

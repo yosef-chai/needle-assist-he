@@ -1,30 +1,13 @@
 # -*- coding: utf-8 -*-
-"""Import the integration's Hebrew logic without a running Home Assistant.
+"""Root conftest.
 
-``needle_assist/__init__.py`` imports Home Assistant, so importing the package
-the ordinary way fails on a bare CI runner. Registering a stand-in parent
-package skips that one file while leaving the relative imports *inside* the
-modules working — so these tests exercise the shipped files byte for byte,
-rather than a copy kept in step by hand.
+The component loader the Hebrew logic suite uses lives in
+`component_loader.py`, not here: `tests/ha/conftest.py` shadows the plain
+name `conftest` on pytest's path, so importing the helper by that name
+reached the wrong file.
 """
 
-from __future__ import annotations
-
-import importlib
-import pathlib
-import sys
-import types
-
-COMPONENT = (pathlib.Path(__file__).resolve().parents[1]
-             / "custom_components" / "needle_assist")
-
-_PACKAGE = "needle_assist"
-
-
-def load(name: str):
-    """Import ``needle_assist.<name>`` without running the package __init__."""
-    if _PACKAGE not in sys.modules:
-        package = types.ModuleType(_PACKAGE)
-        package.__path__ = [str(COMPONENT)]
-        sys.modules[_PACKAGE] = package
-    return importlib.import_module(f"{_PACKAGE}.{name}")
+# The Home Assistant suite under `tests/ha/` needs the harness plugin, and
+# pytest only honours `pytest_plugins` in the root conftest. Declaring it here
+# costs the logic tests nothing: nothing boots until a test asks for `hass`.
+pytest_plugins = "pytest_homeassistant_custom_component"

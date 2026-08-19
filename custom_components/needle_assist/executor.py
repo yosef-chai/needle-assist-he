@@ -43,21 +43,34 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from homeassistant.core import HomeAssistant, Context
+from homeassistant.core import Context, HomeAssistant
 from homeassistant.helpers import (
     area_registry as ar,
+)
+from homeassistant.helpers import (
     device_registry as dr,
+)
+from homeassistant.helpers import (
     entity_registry as er,
+)
+from homeassistant.helpers import (
     intent,
 )
 
 from . import direction, slot_match, tool_router
 from .const import (
-    ALL_WHEN_UNNAMED, CONF_MUSIC_PLAYER, MEDIA_TOOLS, MUSIC_INTEGRATION,
-    SETTING_SLOT,
+    ALL_WHEN_UNNAMED,
+    CONF_MUSIC_PLAYER,
+    MEDIA_TOOLS,
+    MUSIC_INTEGRATION,
     NAME_ADDRESSED,
-    NON_SERVICE_ARGS, QUERY_TOOLS, ROUTINE_SIBLING, SERVICE_MAP,
-    TOOL_ARGS, TOOL_DOMAIN,
+    NON_SERVICE_ARGS,
+    QUERY_TOOLS,
+    ROUTINE_SIBLING,
+    SERVICE_MAP,
+    SETTING_SLOT,
+    TOOL_ARGS,
+    TOOL_DOMAIN,
     WEATHER_STATES_HE,
 )
 
@@ -87,7 +100,7 @@ class CallExecutor:
         self._entry = entry
 
     @property
-    def options(self) -> dict:
+    def options(self) -> dict[str, Any]:
         return dict(getattr(self._entry, "options", None) or {})
 
     # -- targeting ----------------------------------------------------------
@@ -206,15 +219,16 @@ class CallExecutor:
         for state in self.hass.states.async_all(domain):
             object_id = state.entity_id.split(".", 1)[1].casefold()
             friendly = str(state.attributes.get("friendly_name", "")).casefold()
-            if want == object_id or want in object_id.split("_") or want == friendly:
-                hits.append(state.entity_id)
-            elif want.replace("_", " ") in friendly:
+            if (want in (object_id, friendly)
+                    or want in object_id.split("_")
+                    or want.replace("_", " ") in friendly):
                 hits.append(state.entity_id)
         return hits
 
     # -- argument translation ----------------------------------------------
-    def _service_data(self, tool: str, args: dict, entity_ids: list[str],
-                      utterance: str = "") -> dict:
+    def _service_data(self, tool: str, args: dict[str, Any],
+                      entity_ids: list[str],
+                      utterance: str = "") -> dict[str, Any]:
         """Model arguments -> Home Assistant service data."""
         allowed = TOOL_ARGS.get(tool, frozenset())
         data: dict[str, Any] = {
@@ -225,12 +239,11 @@ class CallExecutor:
         # Slots the sentence names outright. These come first and stand apart
         # from the arithmetic below, because they are not a translation of the
         # model's answer - they replace it. See `slot_match.SETTING_WORDS`.
-        if utterance:
-            # The speaker said "שקט" or "גבוה", and which of the enum's values
-            # that is does not need a model: 474 right and 0 wrong.
-            if (slot := SETTING_SLOT.get(tool)) and (
-                    said := slot_match.setting_from(utterance, slot)):
-                data[slot] = said
+        # The speaker said "שקט" or "גבוה", and which of the enum's values
+        # that is does not need a model: 474 right and 0 wrong.
+        if utterance and (slot := SETTING_SLOT.get(tool)) and (
+                said := slot_match.setting_from(utterance, slot)):
+            data[slot] = said
 
         if tool == "media_set_volume":
             # HA takes volume_level as 0..1; the model speaks in percent.
@@ -283,7 +296,7 @@ class CallExecutor:
         return default
 
     # -- execution ----------------------------------------------------------
-    async def execute(self, call: dict, device_id: str | None,
+    async def execute(self, call: dict[str, Any], device_id: str | None,
                       context: Context, utterance: str = "",
                       index: int = 0, total: int = 1) -> CallOutcome:
         """Run one tool call. ``index``/``total`` place it among its siblings,
@@ -442,7 +455,7 @@ class CallExecutor:
         # room is real, and the configured default is checked next.
         return in_area or players
 
-    async def _play_music(self, args: dict, device_id: str | None,
+    async def _play_music(self, args: dict[str, Any], device_id: str | None,
                           context: Context, utterance: str,
                           index: int, total: int) -> CallOutcome:
         """Search Music Assistant for what the sentence named, and play it.
@@ -499,7 +512,7 @@ class CallExecutor:
         chosen = self.options.get(CONF_MUSIC_PLAYER)
         return chosen if chosen in players else None
 
-    async def _call(self, domain: str, service: str, data: dict,
+    async def _call(self, domain: str, service: str, data: dict[str, Any],
                     context: Context, tool: str, entities: int,
                     speech: str | None = None) -> CallOutcome:
         """One service call, with the failure path every caller needs."""
@@ -512,7 +525,7 @@ class CallExecutor:
         return CallOutcome(tool, True, entities=entities, speech=speech)
 
     # -- read-only ----------------------------------------------------------
-    async def _answer_query(self, tool: str, args: dict,
+    async def _answer_query(self, tool: str, args: dict[str, Any],
                             device_id: str | None, utterance: str = "",
                             index: int = 0, total: int = 1) -> CallOutcome:
         if tool == "get_weather":
@@ -550,14 +563,17 @@ class CallExecutor:
         on_words = {"on", "open", "unlocked", "playing", "cleaning", "active", "home"}
         on, off, values = [], [], []
         for eid in entity_ids:
-            st = self.hass.states.get(eid)
-            if st is None:
+            # A separate name from the weather `st` above: that one is always a
+            # state, this one is whatever the registry still has, which for an
+            # entity removed mid-sentence is nothing.
+            state = self.hass.states.get(eid)
+            if state is None:
                 continue
-            name = st.attributes.get("friendly_name", eid)
+            name = state.attributes.get("friendly_name", eid)
             if domain in ("sensor",):
-                unit = st.attributes.get("unit_of_measurement", "")
-                values.append(f"{name}: {st.state} {unit}".strip())
-            elif st.state in on_words:
+                unit = state.attributes.get("unit_of_measurement", "")
+                values.append(f"{name}: {state.state} {unit}".strip())
+            elif state.state in on_words:
                 on.append(name)
             else:
                 off.append(name)

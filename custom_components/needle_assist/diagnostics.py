@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Diagnostics: what this house looks like to the integration.
 
 Home Assistant shows this behind *Settings > Devices & Services > Needle Assist
@@ -32,16 +31,35 @@ from homeassistant.helpers import entity_registry as er
 from . import direction, slot_match, tool_router
 from .clause_split import MAX_CLAUSES
 from .const import (
-    CONF_MUSIC_PLAYER, CONF_WEIGHTS, DOMAIN, MUSIC_INTEGRATION,
+    BUNDLED_WEIGHTS,
+    CONF_MUSIC_PLAYER,
+    MUSIC_INTEGRATION,
 )
 from .needle_engine.agent import fetch
+
+
+def _weights_label(runner: Any) -> str:
+    """Which model is loaded, phrased so it cannot be misread.
+
+    This reported `entry.data["weights_path"]` and called an empty one "base
+    model", which is exactly backwards: empty means the tuned Hebrew adapter
+    that ships inside the component, and the base model is the one that does
+    not understand Hebrew at all. The runner resolves the path at load time, so
+    ask it instead of asking the entry.
+    """
+    resolved = getattr(runner, "weights", None)
+    if not resolved:
+        return "base model - untuned, does not understand Hebrew"
+    if resolved == str(BUNDLED_WEIGHTS):
+        return f"bundled Hebrew adapter ({resolved})"
+    return f"configured ({resolved})"
 
 
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
     """Everything needed to explain a targeting decision, and nothing else."""
-    runner = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    runner = entry.runtime_data
 
     # On the event loop deliberately. The registry and state-machine helpers
     # are not thread-safe, and this is in-memory dictionary walking with no I/O
@@ -60,7 +78,7 @@ async def async_get_config_entry_diagnostics(
     return {
         "engine": {
             "version": fetch.ENGINE_VERSION,
-            "weights": entry.data.get(CONF_WEIGHTS) or "base model",
+            "weights": _weights_label(runner),
             "tools_declared_per_turn": tool_router.MAX_TOOLS,
             "tools_in_catalogue": len(getattr(runner, "_tools", []) or []),
         },

@@ -15,7 +15,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import pytest  # noqa: E402
-from conftest import load  # noqa: E402
+from component_loader import load  # noqa: E402
 
 TEXT = load("hebrew_text")
 ROUTER = load("tool_router")

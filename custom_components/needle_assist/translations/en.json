@@ -10,6 +10,16 @@
         "data_description": {
           "weights_path": "Leave empty to use the model that came with the integration."
         }
+      },
+      "reconfigure": {
+        "title": "Needle Assist (Hebrew)",
+        "description": "Leave this empty to use the model that ships with the integration — that is the one every update keeps current. Fill it in only to run your own fine-tuned .cact file instead.",
+        "data": {
+          "weights_path": "Path to your own .cact file (optional)"
+        },
+        "data_description": {
+          "weights_path": "Empty means the bundled model. A path here is never touched by an update, so an old file would keep loading forever."
+        }
       }
     },
     "error": {
@@ -18,27 +28,30 @@
       "weights_missing": "The bundled model is not present in this installation, so a path is required. Reinstall the integration, or point this at a .cact file yourself."
     },
     "abort": {
-      "already_configured": "Needle Assist is already set up."
+      "already_configured": "Needle Assist is already set up.",
+      "reconfigure_successful": "Needle Assist has been updated."
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "Needle Assist options",
-        "description": "Every default here is the value that measured best. Change them only if you know why.",
+        "description": "Two settings, and only two. Everything else has one measured-correct value and is set for you.",
         "data": {
           "music_player": "Speaker for music (optional)",
-          "refuse_off_topic": "Refuse utterances that are not about the house",
-          "max_new_tokens": "Maximum tokens to generate per utterance",
-          "min_confidence": "Minimum confidence to act (0 disables gating)"
+          "max_new_tokens": "Maximum tokens to generate per utterance"
         },
         "data_description": {
           "music_player": "Which Music Assistant speaker plays when the request names no room. Leave empty if you have one player, or if you always say where you want the music.",
-          "refuse_off_topic": "On by default. The model itself never refuses anything — measured at 0.0% correct refusal — so without this a question about the weather in Paris can move a device. Turning it off lets the model answer everything, including the things it should not.",
-          "max_new_tokens": "A tool call is about 25 tokens. The extra room is for multi-command sentences; raising it does not make answers better.",
-          "min_confidence": "Leave at 0 for a fine-tuned model. Fine-tuning does not update the confidence head, and correct non-English calls have been measured at 0.0, so any threshold above 0 would reject valid Hebrew commands."
+          "max_new_tokens": "A tool call is about 25 tokens. The extra room is for multi-command sentences; raising it does not make answers better."
         }
       }
+    }
+  },
+  "issues": {
+    "weights_file_missing": {
+      "title": "Needle Assist cannot find its model file",
+      "description": "The model file this integration was pointed at is no longer there:\n\n`{path}`\n\nUntil it is, the Hebrew assistant cannot start. Open the integration, choose **Reconfigure**, and either correct the path or clear the field to go back to the model that ships with the integration."
     }
   }
 }

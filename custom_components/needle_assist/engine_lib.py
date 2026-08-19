@@ -36,11 +36,17 @@ module will simply find it.
 
 from __future__ import annotations
 
+import io
 import logging
 import os
 import urllib.request
 import zipfile
 from pathlib import Path
+from typing import Final, NamedTuple
+
+import aiohttp
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .needle_engine.agent import fetch
 
@@ -56,65 +62,135 @@ _WHEEL_URL = "https://huggingface.co/{repo}/resolve/main/python/{wheel}"
 # rather than re-downloading.
 _CACHE_DIR = "needle_assist_engine"
 
+# The engine release this component vendors. `fetch` is upstream code kept
+# byte-identical and therefore untyped, so its values are named here - once,
+# with their types - and nothing below reads it directly.
+ENGINE_VERSION: Final[str] = fetch.ENGINE_VERSION
+HF_REPO: Final[str] = fetch.HF_REPO
+
 _TIMEOUT = 120
 
 
 def cache_dir(config_path: str) -> Path:
     """Directory holding the engine for the version this component vendors."""
-    return Path(config_path) / _CACHE_DIR / fetch.ENGINE_VERSION
+    return Path(config_path) / _CACHE_DIR / ENGINE_VERSION
 
 
 def library_path(config_path: str) -> Path:
     """Where the native library is expected, whether or not it exists yet."""
-    return cache_dir(config_path) / fetch._lib_name()
+    # The vendored engine is untyped upstream code; name the type here, at
+    # the boundary, rather than letting Any leak into a Path.
+    name: str = fetch._lib_name()
+    return cache_dir(config_path) / name
+
+
+class _Wheel(NamedTuple):
+    """Where this machine's engine lives, and what to take out of it."""
+
+    url: str
+    member: str
+    tag: str
+
+
+def _wheel_for_this_machine() -> _Wheel:
+    """The wheel to fetch and the file inside it, for this architecture.
+
+    `_platform_tag` reads `platform.machine()` and sniffs /proc/self/maps for
+    musl, so it identifies Alpine-based Home Assistant OS correctly without us
+    having to guess. Reusing it rather than reimplementing it means the
+    architecture logic has exactly one definition.
+    """
+    tag: str = fetch._platform_tag()
+    wheel = f"cactus_needle-{ENGINE_VERSION}-py3-none-{tag}.whl"
+    member: str = "needle/" + fetch._lib_name_for(tag)
+    return _Wheel(_WHEEL_URL.format(repo=HF_REPO, wheel=wheel), member, tag)
+
+
+def _by_hand(wheel: _Wheel, target: Path, err: object) -> str:
+    """The message for a machine that could not fetch its own engine."""
+    return (
+        f"could not fetch the Needle engine for this platform ({wheel.tag}) "
+        f"from {wheel.url}: {err}. Home Assistant needs it once; afterwards it "
+        f"runs offline. To install it by hand, extract {wheel.member} from that "
+        f"wheel to {target}."
+    )
+
+
+def _install(target: Path, archive_bytes: bytes, wheel: _Wheel) -> str:
+    """Take the library out of a downloaded wheel and put it in place.
+
+    Blocking: unzips and writes. Written beside the target and renamed, so an
+    interrupted install can never leave a half-written .so for ctypes to load
+    on the next start.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+            payload = archive.read(wheel.member)
+    except Exception as err:
+        raise RuntimeError(_by_hand(wheel, target, err)) from err
+
+    staged = target.with_suffix(target.suffix + ".part")
+    staged.write_bytes(payload)
+    os.replace(staged, target)
+    _LOGGER.info("engine ready at %s (%d bytes)", target, len(payload))
+    return str(target)
+
+
+async def async_ensure_library(hass: HomeAssistant, config_path: str) -> str:
+    """Return the path to the engine, fetching it once over Home Assistant's
+    own HTTP session if it is missing.
+
+    This is the only network call the integration ever makes, and it happens
+    once per engine version on a fresh install; everything after it is local.
+    Going through `async_get_clientsession` rather than through `urllib` means
+    it inherits the instance's proxy settings, its SSL context and its
+    connection pool, which is what the quality scale asks for and is also
+    simply the right way to make an HTTP request inside Home Assistant.
+    """
+    target = library_path(config_path)
+    if await hass.async_add_executor_job(target.exists):
+        _LOGGER.debug("engine already present at %s", target)
+        return str(target)
+
+    wheel = _wheel_for_this_machine()
+    _LOGGER.info("fetching Needle engine %s for %s", ENGINE_VERSION, wheel.tag)
+    try:
+        response = await async_get_clientsession(hass).get(
+            wheel.url, timeout=aiohttp.ClientTimeout(total=_TIMEOUT)
+        )
+        response.raise_for_status()
+        archive_bytes = await response.read()
+    except Exception as err:
+        raise RuntimeError(_by_hand(wheel, target, err)) from err
+
+    return await hass.async_add_executor_job(
+        _install, target, archive_bytes, wheel
+    )
 
 
 def ensure_library(config_path: str) -> str:
     """Return the path to the engine, downloading it once if it is missing.
 
-    Blocking: does file I/O and possibly an HTTPS download, so Home Assistant
-    must call this from an executor, never on the event loop.
+    The fallback for anything running without a `hass` - the test suite, and a
+    first utterance that somehow arrives before setup finished the download.
+    Blocking on both counts, so Home Assistant calls it from an executor.
+    :func:`async_ensure_library` is the one that runs on a live instance.
     """
     target = library_path(config_path)
     if target.exists():
         _LOGGER.debug("engine already present at %s", target)
         return str(target)
 
-    # `_platform_tag` reads `platform.machine()` and sniffs /proc/self/maps for
-    # musl, so it identifies Alpine-based Home Assistant OS correctly without
-    # us having to guess. Reusing it rather than reimplementing it means the
-    # architecture logic has exactly one definition.
-    tag = fetch._platform_tag()
-    wheel = "cactus_needle-{}-py3-none-{}.whl".format(fetch.ENGINE_VERSION, tag)
-    url = _WHEEL_URL.format(repo=fetch.HF_REPO, wheel=wheel)
-    member = "needle/" + fetch._lib_name_for(tag)
-
-    target.parent.mkdir(parents=True, exist_ok=True)
-    _LOGGER.info("fetching Needle engine %s for %s", fetch.ENGINE_VERSION, tag)
-
-    archive = target.parent / (wheel + ".part")
+    wheel = _wheel_for_this_machine()
+    _LOGGER.info("fetching Needle engine %s for %s", ENGINE_VERSION, wheel.tag)
     try:
-        with urllib.request.urlopen(url, timeout=_TIMEOUT) as response:
-            archive.write_bytes(response.read())
-        with zipfile.ZipFile(archive) as zf:
-            payload = zf.read(member)
+        with urllib.request.urlopen(wheel.url, timeout=_TIMEOUT) as response:
+            archive_bytes = response.read()
     except Exception as err:
-        raise RuntimeError(
-            f"could not fetch the Needle engine for this platform ({tag}) from "
-            f"{url}: {err}. Home Assistant needs it once; afterwards it runs "
-            f"offline. To install it by hand, extract {member} from that wheel "
-            f"to {target}."
-        ) from err
-    finally:
-        archive.unlink(missing_ok=True)
+        raise RuntimeError(_by_hand(wheel, target, err)) from err
 
-    # Write beside the target and rename, so an interrupted download can never
-    # leave a half-written .so that ctypes would try to load on next start.
-    staged = target.with_suffix(target.suffix + ".part")
-    staged.write_bytes(payload)
-    os.replace(staged, target)
-    _LOGGER.info("engine ready at %s (%d bytes)", target, len(payload))
-    return str(target)
+    return _install(target, archive_bytes, wheel)
 
 
 def bind_library(config_path: str) -> str:
