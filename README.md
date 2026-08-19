@@ -101,14 +101,14 @@
 
 | | |
 |---|---|
-| בחירת הכלי הנכון | **75.5%** |
-| כלי **וגם** כל הארגומנטים | **58.0%** |
+| בחירת הכלי הנכון | **76.4%** |
+| כלי **וגם** כל הארגומנטים | **58.2%** |
 | משפט עם כמה פקודות — בחירת הכלים | **95.3%** (היה 0.0%) |
 | משפט עם כמה פקודות — כלים וארגומנטים | **91.7%** |
 | תיקון עצמי באמצע משפט ("לא לא, תעשה...") | **100%** |
 | "בכל הבית" | **98.7%** |
-| בקשות מוזיקה — הכלי הנכון | **71.5%** |
-| בקשות מוזיקה — הכלי, השם והסוג | **69.1%** |
+| בקשות מוזיקה — הכלי הנכון | **88.6%** |
+| בקשות מוזיקה — הכלי, השם והסוג | **72.4%** |
 | נעילה ופתיחה — הכיוון הנכון | **95.9%** |
 | הכיוון נקרא מהמילים: מסכים / סותר את התווית | **1337 / 0** |
 | הסימן של שינוי יחסי: מסכים / סותר | **1222 / 1** |
@@ -121,8 +121,8 @@
 | פקודות אמיתיות שנדחו בטעות | 1.87% |
 
 **וכמה מזה הוא המודל?** אותם משקלים בדיוק, אותן שאלות, בלי השכבה
-הדטרמיניסטית סביבם: **51.1%** בחירת כלי במקום 75.5%, **28.9%** התאמה מלאה
-במקום 58.0%, ו‑**0.5%** סירוב נכון במקום 75.0%. קרוב לחצי ממה שהמערכת עושה
+הדטרמיניסטית סביבם: **51.1%** בחירת כלי במקום 76.4%, **28.9%** התאמה מלאה
+במקום 58.2%, ו‑**0.5%** סירוב נכון במקום 75.0%. קרוב לחצי ממה שהמערכת עושה
 נכון, היא עושה מחוץ למודל.
 
 **למה זיהוי החדר גבוה בהרבה מדיוק המודל?** כי הוא לא נעשה במודל. המודל מכיר 12 קודי חדר קבועים באנגלית; בית אמיתי לא מתחלק ל‑12. אז החדר, שם המכשיר, שם הסצנה ותוכן ההתראה נקראים מהמשפט בקוד דטרמיניסטי מול הרישומים האמיתיים של Home Assistant. אותה בחירה נעשתה גם לגבי בחירת הכלי ולגבי הסירוב: **כל מה שאפשר להכריע בוודאות, מוכרע מחוץ למודל.**
@@ -195,14 +195,14 @@ On **all 2,379 rows** of the held-out test set, out of 22,520 generated:
 
 | | |
 |---|---|
-| correct tool | **75.5%** |
-| tool **and** every argument | **58.0%** |
+| correct tool | **76.4%** |
+| tool **and** every argument | **58.2%** |
 | multi-order sentences, correct tool set | **95.3%** (was 0.0%) |
 | multi-order sentences, tools and arguments | **91.7%** |
 | mid-sentence self-correction ("no no, do...") | **100%** |
 | "the whole house" | **98.7%** |
-| music requests, correct tool | **71.5%** |
-| music requests, tool, title and kind | **69.1%** |
+| music requests, correct tool | **88.6%** |
+| music requests, tool, title and kind | **72.4%** |
 | lock and unlock, the right direction | **95.9%** |
 | direction read from the words: agrees / contradicts the label | **1337 / 0** |
 | sign of a relative change: agrees / contradicts | **1222 / 1** |
@@ -216,7 +216,7 @@ On **all 2,379 rows** of the held-out test set, out of 22,520 generated:
 
 **And how much of that is the model?** The same weights, the same questions,
 without the deterministic layer around them: **51.1%** correct tool instead of
-75.5%, **28.9%** exact instead of 58.0%, and **0.5%** correct refusal instead
+76.4%, **28.9%** exact instead of 58.2%, and **0.5%** correct refusal instead
 of 75.0%. Nearly half of what this system gets right, it gets right outside the
 model.
 
