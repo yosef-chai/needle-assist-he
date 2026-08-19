@@ -51,7 +51,7 @@ from typing import Any, Final, Iterable
 
 from .area_map import AREA_ALIASES, slug_for_name
 from .hebrew_text import PhraseIndex, normalise
-from .tool_router import FAMILY_NOUNS, _variants
+from .tool_router import FAMILY_NOUNS, _fold, _variants
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -179,11 +179,22 @@ def extract_message(utterance: str) -> str | None:
 # household's own Music Assistant automation triggers on, which is where the
 # feature came from - the difference is that the automation hands the sentence
 # to a cloud LLM to turn into JSON, and this does it here, offline.
+_LISTEN_VERBS: Final = frozenset(
+    "האזין האזן האזני תאזין תאזיני".split())
+
 _MUSIC_VERB: Final = re.compile(
-    r"^\s*(?:אה|אממ|נו|רגע|אוקיי|כאילו)?[,\s]*"
-    r"(?:נגן|נגני|תנגן|תנגני|השמע|השמיעי|תשמיע|תשמיעי|"
-    r"שים|שימי|תשים|תשימי|הפעל|הפעילי|תפעיל|תפעילי|"
-    r"האזן|האזני|תאזין|תאזיני|ערבב|ערבבי|תערבב|תערבבי)"
+    # Anywhere in the sentence, not only at the head. Israelis wrap an order in
+    # a frame far more often than they bark it: "אני צריך שתנגן לי", "תוכל
+    # לשים". Anchoring at the start looked tidy and cost 72 of 97 requests on
+    # the held-out music rows, which is the difference between the feature
+    # working and the feature quietly resuming whatever was playing.
+    r"(?:^|\s)"
+    # The clitics that carry those frames. ל is the infinitive - לנגן, לשים,
+    # להשמיע - and ש opens the subordinate clause the frame needs.
+    r"(?:ש|ל|ו|כש|וש)?"
+    r"(?P<verb>נגן|נגני|תנגן|תנגני|השמע|השמיעי|תשמיע|תשמיעי|"
+    r"שים|שימי|תשים|תשימי|הפעיל|הפעל|הפעילי|תפעיל|תפעילי|"
+    r"האזין|האזן|האזני|תאזין|תאזיני|ערבב|ערבבי|תערבב|תערבבי)"
     r"(?:\s+ל(?:י|נו))?\s+")
 
 # A word that says which *kind* of thing to play, and what it maps to in
@@ -194,7 +205,7 @@ _MEDIA_KINDS: Final[tuple[tuple[str, str], ...]] = (
     ("album", r"ה?(?:אלבום|תקליט|דיסק)"),
     ("artist", r"ה?(?:אמן|אמנית|זמר|זמרת|להקה|הרכב)"),
     ("playlist", r"ה?(?:פלייליסט|רשימת\s+השמעה|רשימת\s+ההשמעה)"),
-    ("radio", r"ה?(?:תחנת\s+רדיו|רדיו|תחנה)"),
+    ("radio", r"ה?(?:תחנת\s+ה?רדיו|רדיו|תחנה)"),
 )
 _MEDIA_KIND_RE: Final = tuple(
     (kind, re.compile(r"^(?:את\s+)?" + pattern + r"\b\s*"))
@@ -216,10 +227,22 @@ _OF: Final = re.compile(r"(?:^|\s)של\s+")
 # machine in the house, not a record: "תפעיל את השואב" opens with a verb this
 # module recognises and leaves "השואב" behind, and searching a music library
 # for the vacuum cleaner is not what anybody meant.
+# Folded, because `_variants` folds: Hebrew's five final letters are the
+# same letters, and "הפן" reaches this set as "פנ" while the table spells
+# it "פן". Unfolded, an air conditioner parsed as a record title.
 _DEVICE_NOUNS: Final = frozenset(
-    noun for family, nouns in FAMILY_NOUNS.items() if family != "media"
+    _fold(noun) for family, nouns in FAMILY_NOUNS.items() if family != "media"
     for noun in nouns
 )
+
+# Words that stand where a name would and are not one. Matched through a
+# PhraseIndex rather than a set so that speech-to-text damage still lands -
+# the corpus contains "מוזיכה" for "מוזיקה", and a request for something
+# to listen to must not become a search for a misspelling.
+_VAGUE = PhraseIndex()
+for _word in ("משהו", "טוב", "טובה", "נחמד", "נעים", "כיף", "מוזיקה",
+              "מוסיקה", "קצת", "עוד", "שיר", "שירים"):
+    _VAGUE.add(_word, "vague")
 
 _NOT_A_NAME: Final = frozenset(
     "הזה הזאת הזו זה זאת אותו אותה משהו מוזיקה מוסיקה שיר שירים את ה קצת עוד "
@@ -269,10 +292,14 @@ def extract_music(utterance: str) -> MusicRequest | None:
     the library for ``עומר אדמ``.
     """
     text = " ".join(utterance.split())
-    opener = _MUSIC_VERB.match(text)
-    if not opener:
+    # The last verb, not the first: "תוכל לשים לי" has the frame's verb in
+    # front of the real one, and what follows the real one is the title.
+    openers = list(_MUSIC_VERB.finditer(text))
+    if not openers:
         return None
-    rest = _POLITE_TAIL.sub("", text[opener.end():]).strip()
+    rest = _POLITE_TAIL.sub("", text[openers[-1].end():]).strip()
+    if openers[-1].group("verb") in _LISTEN_VERBS and rest.startswith("ל"):
+        rest = rest[1:]
 
     media_type: str | None = None
     for kind, pattern in _MEDIA_KIND_RE:
@@ -298,7 +325,9 @@ def extract_music(utterance: str) -> MusicRequest | None:
 
     if not rest and artist:
         rest, artist = artist, None
-    if not rest or all(w in _NOT_A_NAME for w in rest.split()) or _names_a_device(rest):
+    if _names_a_device(rest) or (artist and _names_a_device(artist)):
+        return None
+    if not rest or _is_vague(rest, media_type):
         # "play something by X" - the artist is the only name in the sentence.
         if artist:
             return MusicRequest(artist, media_type or "artist")
@@ -307,10 +336,43 @@ def extract_music(utterance: str) -> MusicRequest | None:
     return MusicRequest(rest, media_type, artist=artist)
 
 
+def _is_vague(text: str, media_type: str | None) -> bool:
+    """Does this name nothing in particular?
+
+    A kind word switches the test off entirely: "פלייליסט רגוע" is a playlist
+    that is actually called רגוע, while a bare "משהו טוב" is a mood. Every word
+    has to be vague for the phrase to be, so "לילה טוב" survives.
+    """
+    words = text.split()
+    if not words:
+        return True
+    # Grammar words are never a name, whatever kind was said: "the next song"
+    # states a kind and still names nothing.
+    if all(word in _NOT_A_NAME for word in words):
+        return True
+    if media_type:
+        return False
+    return all(word in _NOT_A_NAME or _VAGUE.find(word) is not None
+               for word in words)
+
+
 def _names_a_device(text: str) -> bool:
     """Is every word here the name of something in the house rather than music?"""
     words = text.split()
-    return bool(words) and all(
+    # "שים את הרובוט על שקט" is "set the vacuum to quiet", not a record called
+    # "the vacuum on quiet". A trailing על-phrase is the value of a setting -
+    # any על that named a room was already removed by _strip_trailing_room - so
+    # the device test looks at what comes before it. Only when something does:
+    # "שיר על אהבה" has nothing to the left and stays a title.
+    if "על" in words and words.index("על") > 0:
+        words = words[:words.index("על")]
+    # At least one real device noun, with grammar words tolerated around it.
+    # Without the first condition a residue of nothing but stop words - which
+    # "שירים של היהודים" leaves behind after the split - counted as a device
+    # and threw the artist away.
+    if not any(_variants(word) & _DEVICE_NOUNS for word in words):
+        return False
+    return all(
         word in _NOT_A_NAME or bool(_variants(word) & _DEVICE_NOUNS)
         for word in words
     )
@@ -332,7 +394,7 @@ def _strip_trailing_room(text: str) -> str:
     # The shortest tail that is itself a room phrase is the room.
     for take in range(1, min(3, len(words)) + 1):
         tail = " ".join(words[-take:])
-        if tail.startswith(("ב", "ל")) and _ANY_ROOM.find(tail, fuzzy=False):
+        if tail.startswith(("ב", "ל", "על")) and _ANY_ROOM.find(tail, fuzzy=False):
             return " ".join(words[:-take])
     return text
 

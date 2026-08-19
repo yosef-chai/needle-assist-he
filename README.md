@@ -103,6 +103,8 @@
 | בחירת הכלי הנכון | 66.8% |
 | כלי **וגם** כל הארגומנטים | 44.2% |
 | משפט עם כמה פקודות — בחירת הכלים | **75.3%** (היה 0.0%) |
+| בקשות מוזיקה — הכלי הנכון בפועל | **86.2%** |
+| בקשות מוזיקה — שם השיר נקרא נכון מהמשפט | **83 מתוך 85** |
 | זיהוי החדר (בקוד, לא במודל) | **99.0%** |
 | זיהוי חדר במילים נרדפות שלא נראו באימון | **100%** |
 | ניתוב לכלי הנכון (רשימה מקוצרת) | 98.8% |
@@ -183,6 +185,8 @@ On 400 unseen held-out rows, and across all 18,806 generated rows:
 | correct tool | 66.8% |
 | tool **and** every argument | 44.2% |
 | multi-order sentences, correct tool set | **75.3%** (was 0.0%) |
+| music requests, correct tool at runtime | **86.2%** |
+| music requests, title read correctly from the sentence | **83 of 85** |
 | room resolution (in code, not in the model) | **99.0%** |
 | room resolution, synonyms never seen in training | **100%** |
 | tool shortlist recall | 98.8% |

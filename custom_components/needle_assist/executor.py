@@ -357,16 +357,9 @@ class CallExecutor:
             return CallOutcome(tool, False, "no matching entities")
 
         data = self._service_data(tool, args, entity_ids, utterance)
-        try:
-            await self.hass.services.async_call(
-                domain, service, {"entity_id": entity_ids, **data},
-                blocking=True, context=context,
-            )
-        except Exception as err:  # service validation, unavailable device, ...
-            _LOGGER.error("%s.%s failed: %s", domain, service, err)
-            return CallOutcome(tool, False, str(err))
-
-        return CallOutcome(tool, True, entities=len(entity_ids))
+        return await self._call(domain, service,
+                                {"entity_id": entity_ids, **data},
+                                context, tool, len(entity_ids))
 
     # -- music --------------------------------------------------------------
     def _music_players(self, area_ids: list[str], all_areas: bool) -> list[str]:

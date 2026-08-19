@@ -358,3 +358,39 @@ def test_the_router_offers_the_music_tool_when_a_kind_is_named():
     # "Stop the song" is transport control; the noun must not hijack it.
     assert ROUTER.select_tool_names("תעצור את השיר")[0] == "media_pause"
     assert "music_play" not in ROUTER.select_tool_names("תדליק את האור בסלון")
+
+
+def test_a_framed_request_still_names_its_music():
+    """Israelis wrap an order in a frame far more often than they bark it.
+
+    Anchoring the verb at the head of the sentence looked tidy and lost 72 of
+    97 held-out music requests. Hebrew also builds the infinitive from a stem
+    that is not the imperative - להפעיל is ל + הפעיל - and puts the definite
+    article on the second noun of a construct chain.
+    """
+    assert SLOT.extract_music(
+        "אני רוצה שתנגן לי את אם ננעלו של עומר אדם").media_id == "אם ננעלו"
+    assert SLOT.extract_music(
+        "אפשר להפעיל לנו את הפלייליסט שירים ישראלים").media_id == "שירים ישראלים"
+    assert SLOT.extract_music(
+        "אני צריך שתפעילי לנו את תחנת הרדיו אקו 99").media_id == "אקו 99"
+    assert SLOT.extract_music("תוכל להאזין לפינק פלויד").media_id == "פינק פלויד"
+
+
+def test_a_device_setting_is_not_a_record():
+    """"שים את הרובוט על שקט" sets the vacuum, and שקט is also a media noun.
+
+    That combination is what lets the router offer a play tool on a sentence
+    about a vacuum cleaner, so the extractor has to be the thing that says no.
+    """
+    for sentence in ("תפעיל לנו משהו טוב בחדר ההורים",
+                     "אני רוצה שתנגן לי מוזיכה",
+                     "שים את הרובוט על שקט",
+                     "שים את הפן של המיזוג במטבחון על חזק"):
+        assert SLOT.extract_music(sentence) is None, sentence
+
+
+def test_a_kind_word_protects_a_title_that_looks_vague():
+    """"רגוע" is a mood and also the name of a playlist."""
+    assert SLOT.extract_music("תשמיע פלייליסט רגוע").media_id == "רגוע"
+    assert SLOT.extract_music("תשמיע לי משהו טוב") is None
