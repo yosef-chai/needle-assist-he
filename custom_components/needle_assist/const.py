@@ -203,12 +203,6 @@ MUSIC_INTEGRATION: Final = "music_assistant"
 SETTING_SLOT: Final = {
     "vacuum_set_fan_speed": "fan_speed",
     "climate_set_fan_mode": "fan_mode",
-}
-
-# The same idea where the sentence may only *correct* the model, never fill a
-# slot the model left empty - see `slot_match.SETTING_WORDS` for why `ורוד`
-# cannot be trusted to mean somebody asked for pink.
-CORRECT_ONLY_SLOT: Final = {
     "light_turn_on": "color_name",
 }
 

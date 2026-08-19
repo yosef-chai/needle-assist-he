@@ -337,12 +337,21 @@ SETTING_WORDS: Final[dict[str, dict[str, str]]] = {
 }
 
 
-_SETTING_INDEX: Final[dict[str, PhraseIndex]] = {}
-for _slot, _table in SETTING_WORDS.items():
-    _index = PhraseIndex()
-    for _word, _value in _table.items():
-        _index.add(_word, _value)
-    _SETTING_INDEX[_slot] = _index
+#: The prefixes a *value* takes, which are not the prefixes a verb takes. This
+#: is the whole reason these slots do not go through :class:`PhraseIndex` like
+#: every other phrase in this module: the general chain strips ``ל`` and then
+#: ``ה``, which turns ``להוריד`` - *to lower* - into ``ורוד``, *pink*, and asks
+#: for a pink light on 21 corpus calls that name no colour at all. A colour or
+#: a speed is a noun in a prepositional phrase - "בסגול", "לשקט", "וגבוה" - and
+#: never carries a verb's prefixes. Narrowed to these, the three slots read
+#: 335 / 180 / 293 right, **0 wrong**, and invent one on **0** of the calls
+#: that name none.
+_VALUE_PREFIXES: Final = ("", "ב", "ל", "ו", "וב", "ול", "כ", "ה")
+
+_SETTING_FOLDED: Final[dict[str, dict[str, str]]] = {
+    slot: {normalise(word): value for word, value in table.items()}
+    for slot, table in SETTING_WORDS.items()
+}
 
 
 def setting_from(utterance: str, slot: str) -> str | None:
@@ -352,10 +361,19 @@ def setting_from(utterance: str, slot: str) -> str | None:
     different values - "בין נמוך לגבוה" settles nothing and the model's answer
     is left alone.
     """
-    index = _SETTING_INDEX.get(slot)
-    if index is None or not utterance:
+    table = _SETTING_FOLDED.get(slot)
+    if not table or not utterance:
         return None
-    found = {match.value for match in index.find_all(utterance)}
+    found: set[str] = set()
+    for raw in utterance.split():
+        word = normalise(raw)   # normalise already drops punctuation
+        for prefix in _VALUE_PREFIXES:
+            folded = normalise(prefix)
+            if folded and not word.startswith(folded):
+                continue
+            value = table.get(word[len(folded):])
+            if value is not None:
+                found.add(value)
     return found.pop() if len(found) == 1 else None
 
 

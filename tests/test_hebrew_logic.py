@@ -901,14 +901,17 @@ def test_every_setting_value_is_one_the_tool_accepts():
         assert set(SLOT.SETTING_WORDS[slot].values()) <= allowed, tool
 
 
-def test_a_colour_is_corrected_but_never_invented():
-    """`להוריד` is `ל` + `ה` + `ורוד`, and `ורוד` is pink. The prefix chain
-    that lets "בסלון" find the living room turns "להוריד את התאורה" into a
-    request for a pink light - on 21 corpus calls that name no colour at all.
-    So the colour slot is corrected, never added: `CORRECT_ONLY_SLOT`."""
-    assert SLOT.setting_from("תוכל להוריד את התאורה ליד האוטו", "color_name") == "pink"
-    assert CONST.CORRECT_ONLY_SLOT == {"light_turn_on": "color_name"}
-    assert "light_turn_on" not in CONST.SETTING_SLOT
+def test_a_verb_is_not_a_colour():
+    """`להוריד` is `ל` + `ה` + `ורוד`, and `ורוד` is pink. The general prefix
+    chain - the one that lets "בסלון" find the living room - turns "להוריד את
+    התאורה" into a request for a pink light, on 21 corpus calls that name no
+    colour at all. A value is a noun in a prepositional phrase and never
+    carries a verb's prefixes, which is why these slots do not go through
+    PhraseIndex."""
+    assert SLOT.setting_from("תוכל להוריד את התאורה ליד האוטו", "color_name") is None
+    assert SLOT.setting_from("תעשה את האור בסלון ורוד", "color_name") == "pink"
+    assert SLOT.setting_from("תעשה את האור בסלון בורוד", "color_name") == "pink"
+    assert CONST.SETTING_SLOT["light_turn_on"] == "color_name"
 
 
 @pytest.mark.parametrize("sentence,colour", [

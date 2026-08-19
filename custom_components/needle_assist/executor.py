@@ -53,8 +53,7 @@ from homeassistant.helpers import (
 
 from . import direction, slot_match, tool_router
 from .const import (
-    ALL_WHEN_UNNAMED, CONF_MUSIC_PLAYER, CORRECT_ONLY_SLOT, MEDIA_TOOLS,
-    MUSIC_INTEGRATION,
+    ALL_WHEN_UNNAMED, CONF_MUSIC_PLAYER, MEDIA_TOOLS, MUSIC_INTEGRATION,
     SETTING_SLOT,
     NAME_ADDRESSED,
     NON_SERVICE_ARGS, QUERY_TOOLS, ROUTINE_SIBLING, SERVICE_MAP,
@@ -230,12 +229,6 @@ class CallExecutor:
             # The speaker said "שקט" or "גבוה", and which of the enum's values
             # that is does not need a model: 474 right and 0 wrong.
             if (slot := SETTING_SLOT.get(tool)) and (
-                    said := slot_match.setting_from(utterance, slot)):
-                data[slot] = said
-            # And the same for a colour, except that this one may only correct
-            # a value the model already chose and never add one - "להוריד"
-            # contains "ורוד".
-            if (slot := CORRECT_ONLY_SLOT.get(tool)) and slot in data and (
                     said := slot_match.setting_from(utterance, slot)):
                 data[slot] = said
 
