@@ -863,3 +863,39 @@ def test_the_upgrade_never_leaves_the_audio_domain():
     assert "music_play" not in CONST.MEDIA_TOOLS
     assert not (CONST.MEDIA_TOOLS & set(CONST.QUERY_TOOLS))
     assert CONST.MEDIA_TOOLS <= set(CONST.SERVICE_MAP)
+
+
+@pytest.mark.parametrize("sentence,slot,value", [
+    # The vacuum's suction and the air conditioner's fan are both a word out
+    # of a fixed list, so the sentence has the answer and the model guesses.
+    ("אוקיי, שים את הרובוט על שקט בבקשה", "fan_speed", "silent"),
+    ("בבקשה את יכולה לשים את השואב על רגיל", "fan_speed", "standard"),
+    ("תעביר את המזגן במרפסת למהירות גבוה", "fan_mode", "high"),
+    ("שים את הפן של המזגן על אוטומטי", "fan_mode", "auto"),
+    # Nothing named, so the model keeps its answer.
+    ("תדליק את האור בסלון", "fan_speed", None),
+    # Two values named settles nothing.
+    ("שים את השואב בין שקט לחזק", "fan_speed", None),
+])
+def test_the_sentence_names_the_speed_and_the_mode(sentence, slot, value):
+    assert SLOT.setting_from(sentence, slot) == value
+
+
+def test_the_same_word_means_different_things_in_the_two_tables():
+    """`חזק` is the vacuum's strongest suction and the air conditioner's
+    strongest fan, and they are different enum values - which is why the
+    tables are keyed by slot instead of shared."""
+    assert SLOT.SETTING_WORDS["fan_speed"]["חזק"] == "turbo"
+    assert SLOT.SETTING_WORDS["fan_mode"]["חזק"] == "high"
+
+
+def test_every_setting_value_is_one_the_tool_accepts():
+    """A value outside the schema's enum is a service call Home Assistant
+    rejects, and the sentence would have been read correctly."""
+    import json
+    catalogue = {t["name"]: t for t in json.loads(
+        (pathlib.Path(__file__).resolve().parents[1] / "custom_components"
+         / "needle_assist" / "tools.json").read_text(encoding="utf-8"))}
+    for tool, slot in CONST.SETTING_SLOT.items():
+        allowed = set(catalogue[tool]["parameters"]["properties"][slot]["enum"])
+        assert set(SLOT.SETTING_WORDS[slot].values()) <= allowed, tool

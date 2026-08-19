@@ -54,6 +54,7 @@ from homeassistant.helpers import (
 from . import direction, slot_match, tool_router
 from .const import (
     ALL_WHEN_UNNAMED, CONF_MUSIC_PLAYER, MEDIA_TOOLS, MUSIC_INTEGRATION,
+    SETTING_SLOT,
     NAME_ADDRESSED,
     NON_SERVICE_ARGS, QUERY_TOOLS, ROUTINE_SIBLING, SERVICE_MAP, TOOL_DOMAIN,
     WEATHER_STATES_HE,
@@ -226,6 +227,15 @@ class CallExecutor:
                 step = data.pop("volume_step_pct") / 100
                 current = self._first_attr(entity_ids, "volume_level", 0.5)
                 data["volume_level"] = max(0.0, min(1.0, current + step))
+
+        elif tool in SETTING_SLOT:
+            # The speaker said "שקט" or "גבוה", and which of the enum's values
+            # that is does not need a model - see `slot_match.SETTING_WORDS`,
+            # measured at 474 right and 0 wrong. The model keeps the slot when
+            # the sentence names nothing.
+            slot = SETTING_SLOT[tool]
+            if utterance and (said := slot_match.setting_from(utterance, slot)):
+                data[slot] = said
 
         elif tool == "climate_set_temperature":
             if "temperature_step" in data:

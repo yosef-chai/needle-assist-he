@@ -288,6 +288,58 @@ class MusicRequest:
     artist: str | None = None
 
 
+#: The enum values of ``vacuum_set_fan_speed`` and ``climate_set_fan_mode``, as
+#: they are actually said. Both slots are a word the speaker chose out of a
+#: fixed list, which makes them the same kind of argument as the room and the
+#: music title: the sentence has it and the model guesses at it.
+#:
+#: Measured against gold over both splits, on every call carrying the slot:
+#:
+#:     fan_speed   180 agree, 0 disagree, 6 silent
+#:     fan_mode    294 agree, 0 disagree, 4 silent
+#:
+#: ``חזק`` is deliberately in both tables and means different things in them -
+#: the vacuum's strongest suction is ``turbo`` and the air conditioner's is
+#: ``high`` - which is why they are separate tables keyed by slot rather than
+#: one shared list.
+SETTING_WORDS: Final[dict[str, dict[str, str]]] = {
+    "fan_speed": {
+        "שקט": "silent", "שקטה": "silent",
+        "רגיל": "standard", "רגילה": "standard",
+        "בינוני": "medium", "בינונית": "medium",
+        "חזק": "turbo", "חזקה": "turbo", "טורבו": "turbo", "מקסימום": "turbo",
+    },
+    "fan_mode": {
+        "נמוך": "low", "נמוכה": "low", "חלש": "low",
+        "בינוני": "medium", "בינונית": "medium",
+        "גבוה": "high", "גבוהה": "high", "חזק": "high",
+        "אוטומטי": "auto", "אוטו": "auto",
+    },
+}
+
+
+_SETTING_INDEX: Final[dict[str, PhraseIndex]] = {}
+for _slot, _table in SETTING_WORDS.items():
+    _index = PhraseIndex()
+    for _word, _value in _table.items():
+        _index.add(_word, _value)
+    _SETTING_INDEX[_slot] = _index
+
+
+def setting_from(utterance: str, slot: str) -> str | None:
+    """The value the sentence names for ``slot``, or ``None``.
+
+    ``None`` when the sentence names nothing, and also when it names two
+    different values - "בין נמוך לגבוה" settles nothing and the model's answer
+    is left alone.
+    """
+    index = _SETTING_INDEX.get(slot)
+    if index is None or not utterance:
+        return None
+    found = {match.value for match in index.find_all(utterance)}
+    return found.pop() if len(found) == 1 else None
+
+
 #: A number after the title is a level, not part of the name: "שים את השיר על
 #: שישים" sets the volume. Used to keep :func:`names_a_level` from calling that
 #: sentence a play - see `executor.execute`.

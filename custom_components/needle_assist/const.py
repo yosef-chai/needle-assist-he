@@ -134,6 +134,13 @@ NON_SERVICE_ARGS: Final = {"area", "name"}
 # tool degrades gracefully in a house that does not have it.
 MUSIC_INTEGRATION: Final = "music_assistant"
 
+# Tools whose one argument is a word out of a fixed list, which the sentence
+# names and the model guesses at. See `slot_match.SETTING_WORDS`.
+SETTING_SLOT: Final = {
+    "vacuum_set_fan_speed": "fan_speed",
+    "climate_set_fan_mode": "fan_mode",
+}
+
 # The audio tools a named title can be promoted out of. `music_play` is absent
 # because it is the destination, and the query tools because a question about
 # music is not a request to play it.
