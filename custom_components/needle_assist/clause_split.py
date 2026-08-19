@@ -100,6 +100,7 @@ _JOINERS: Final[tuple[tuple[str, ...], ...]] = tuple(
 #: into "בסלון חם מדי" and "תנמיך משמעותית", because both halves looked like
 #: they held a verb. The first half then set a temperature in the wrong room
 #: and the second opened a blind.
+#:
 #: Every entry has to be a word the router really holds, or it is fiction
 #: dressed as a rule - a test asserts it.
 NOT_ORDERS: Final[frozenset[str]] = frozenset(
