@@ -8,10 +8,10 @@
   "dependencies": [
     "conversation"
   ],
-  "documentation": "https://github.com/Yosef-Chai/needle-assist-he",
+  "documentation": "https://github.com/yosef-chai/needle-assist-he",
   "integration_type": "service",
   "iot_class": "calculated",
-  "issue_tracker": "https://github.com/Yosef-Chai/needle-assist-he/issues",
+  "issue_tracker": "https://github.com/yosef-chai/needle-assist-he/issues",
   "requirements": [],
   "single_config_entry": true,
   "version": "1.4.0"

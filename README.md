@@ -7,7 +7,7 @@
 
 # Needle Assist - עוזר קולי בעברית ל‑Home Assistant
 
-[![validate](https://github.com/Yosef-Chai/needle-assist-he/actions/workflows/validate.yml/badge.svg)](https://github.com/Yosef-Chai/needle-assist-he/actions/workflows/validate.yml)
+[![validate](https://github.com/yosef-chai/needle-assist-he/actions/workflows/validate.yml/badge.svg)](https://github.com/yosef-chai/needle-assist-he/actions/workflows/validate.yml)
 [![hacs](https://img.shields.io/badge/HACS-custom-41BDF5.svg)](https://hacs.xyz)
 
 שליטה בבית החכם בעברית - **בלי ענן, בלי מנוי, בלי ששום דבר יוצא מהבית**, עובד אפילו עם 4GB RAM בלבד.
@@ -39,7 +39,7 @@
 ### דרך HACS (מומלץ)
 
 1. HACS ← ⋮ ← **Custom repositories**
-2. הוסף את `https://github.com/Yosef-Chai/needle-assist-he` בקטגוריה **Integration**
+2. הוסף את `https://github.com/yosef-chai/needle-assist-he` בקטגוריה **Integration**
 3. חפש **Needle Assist (Hebrew)** והתקן
 4. הפעל מחדש את Home Assistant
 
