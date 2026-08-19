@@ -14,12 +14,17 @@ model's answer is corrected when the two disagree - the same rule, and the same
 safety argument, as the ``media_play`` upgrade in :mod:`executor`: it never
 changes which *domain* the model chose, only which of two tools inside it.
 
-Measured against gold over all 2,379 held-out rows, on the 1,542 calls whose
-tool belongs to one of the guarded pairs:
+Measured as it runs - one clause at a time, since `clause_split` cuts the
+sentence first - over all 2,379 held-out rows, on the 1,542 calls whose tool
+belongs to one of the guarded pairs:
 
-    the words agree with gold     1091     70.8%
+    the words agree with gold     1337     86.7%
     the words disagree with gold     0      0.00%
-    the words say nothing          451     29.2%
+    the words say nothing          205     13.3%
+
+Reading the whole sentence instead costs four of these and is the wrong
+measurement anyway: "תעשי את התאורה ואז תכבי אור בסלון" is two orders, and the
+second one's verb is not evidence about the first.
 
 Zero. A signal that is never wrong when it speaks is a signal that can overrule
 a model which is wrong one time in eight.

@@ -279,7 +279,7 @@ class CallExecutor:
 
         # Lock or unlock, open or close, on or off. The Hebrew verb settles
         # it and the model does not always agree with the verb - see
-        # `direction`, where the signal is measured at 1091 right and 0 wrong
+        # `direction`, where the signal is measured at 1337 right and 0 wrong
         # against gold. Corrected before anything else, because everything
         # below reads `tool`.
         if utterance and (settled := direction.settle(tool, utterance)) != tool:
