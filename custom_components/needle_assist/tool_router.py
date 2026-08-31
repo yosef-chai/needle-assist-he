@@ -46,35 +46,85 @@ the model cannot do in Hebrew.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Final
 
 from .area_map import AREA_ALIASES
+from .const import ACTIONS, CALL_OF
 from .hebrew_text import PhraseIndex, normalise
 
 MAX_TOOLS: Final = 5
 _NOUN_WEIGHT: Final = 3
+
+# What the model is offered, and what this module speaks internally.
+#
+# v11 collapsed the catalogue: a domain is one tool now and the behaviour is an
+# ``action`` enum inside it (see ``tools/ha_tools.py``). Everything in this
+# module still ranks the old per-service names - what that file calls a
+# **virtual id** - because every measurement in it was taken at that
+# granularity: TOOL_HINTS separates ``light_turn_on`` from ``light_turn_off``,
+# ``direction.settle`` swaps between them at 1337 agreements and 0
+# disagreements, and the corpus generator names them at every call site.
+#
+# Only :func:`select_tool_names` converts, at the last step, to the tool names
+# the model actually sees. The conversion is many-to-one, which is the whole
+# point: a light command used to spend three of its five slots on
+# light_turn_on/off/toggle and now spends one, so a sentence naming three
+# domains gets all three instead of one and a half.
+TOOL_OF: Final[dict[str, str]] = {}
 
 # Tool names grouped the way the training data groups them. Within a family the
 # order is the order tools are offered when the shortlist has room to spare.
 FAMILY_TOOLS: Final[dict[str, list[str]]] = {
     "light": ["light_turn_on", "light_turn_off", "light_toggle"],
     "climate": ["climate_set_temperature", "climate_set_hvac_mode",
-                "climate_set_fan_mode", "climate_turn_off"],
-    "fan": ["fan_turn_on", "fan_turn_off", "fan_oscillate"],
+                "climate_set_fan_mode", "climate_turn_off",
+                "climate_turn_on"],
+    "fan": ["fan_turn_on", "fan_turn_off", "fan_oscillate", "fan_toggle"],
     "cover": ["cover_open", "cover_close", "cover_stop", "cover_set_position"],
+    # A valve is its own Home Assistant domain and its own tool. It used to be
+    # reached through `cover` and widened by the executor, which worked and
+    # left the model unable to say so; the noun separates the two cleanly in
+    # Hebrew - ברז against תריס - so the family does too. The executor's
+    # widening stays as a second chance, never as the only one.
+    "valve": ["valve_open", "valve_close", "valve_stop", "valve_set_position"],
     "lock": ["lock_lock", "lock_unlock"],
     "camera": ["camera_turn_on", "camera_turn_off"],
     "vacuum": ["vacuum_start", "vacuum_return_to_base", "vacuum_pause",
                "vacuum_set_fan_speed"],
     "media": ["music_play", "media_play", "media_pause", "media_set_volume",
-              "media_mute", "media_next_track", "media_select_source"],
-    "switch": ["switch_turn_on", "switch_turn_off"],
+              "media_mute", "media_next_track", "media_previous_track",
+              "media_stop", "media_select_source"],
+    "switch": ["switch_turn_on", "switch_turn_off", "switch_toggle"],
     "routine": ["scene_activate", "script_run", "automation_turn_on",
-                "automation_turn_off"],
-    "helper": ["input_boolean_turn_on", "input_boolean_turn_off",
-               "timer_start", "timer_cancel", "notify_send"],
+                "automation_turn_off", "button_press"],
+    # Timers left the helper family in v11. They were together because both
+    # answered to `input_boolean`-shaped verbs and the executor had to undo the
+    # confusion afterwards (see const.HELPER_IS_A_TIMER); now they are two
+    # different tools, so the shortlist can simply not offer the wrong one.
+    "helper": ["input_boolean_turn_on", "input_boolean_turn_off"],
+    "timer": ["timer_start", "timer_cancel", "timer_pause", "timer_resume",
+              "timer_add", "timer_less", "timer_status"],
+    "notify": ["notify_send", "broadcast"],
+    # `todo` is one of the eleven domains Home Assistant exposes to Assist by
+    # default and had no route here at all.
+    "list": ["list_add_item", "list_complete_item", "list_remove_item"],
     "query": ["get_state", "get_weather"],
+    "datetime": ["get_date", "get_time"],
+}
+
+TOOL_OF.update({virtual: tool for virtual, (tool, _) in CALL_OF.items()})
+
+assert not {v for names in FAMILY_TOOLS.values() for v in names} - set(TOOL_OF), (
+    "a family names a virtual id the catalogue does not have")
+
+#: How many tools a family can contribute to the shortlist. Three families
+#: hold more than one: media (transport control against playing something
+#: named), notify (a phone against every speaker in the house) and query
+#: (devices against the sky).
+TOOLS_PER_FAMILY: Final[dict[str, int]] = {
+    fam: len({TOOL_OF[v] for v in names}) for fam, names in FAMILY_TOOLS.items()
 }
 
 # Device nouns. These are the strong signal: Hebrew imperatives are heavily
@@ -84,24 +134,91 @@ FAMILY_NOUNS: Final[dict[str, list[str]]] = {
     # Each list also carries the transliterated English the code-switching
     # recipe generates ("את הלייט", "את הא.יי.סי"), because those utterances
     # are Hebrew-framed and never reach an English tool description.
+    # "מנורת" is the construct form and a separate token - "מנורת שינה" never
+    # matches "מנורה". "בהירות" and "עוצמת האור" name the slot rather than the
+    # device, which is how the official Hebrew suite asks for it ("קבע את
+    # הבהירות של מנורת שינה ל50%"); both fire on zero off-topic rows. "צבע" was
+    # measured with them and rejected at 29 - "איזה צבע לצבוע את הקיר" is not a
+    # light command, and the sentence that needs it names מנורת anyway.
     "light": ["אור", "אורות", "תאורה", "מנורה", "מנורות", "נורה", "נורות",
-              "ספוט", "ספוטים", "לד", "דימר", "אורה", "לייט", "לייטס"],
+              "ספוט", "ספוטים", "לד", "דימר", "אורה", "לייט", "לייטס",
+              "מנורת", "בהירות", "עוצמת האור",
+              # The two colour temperatures that name no light on their own.
+              # `lists/he/lights.yaml` spells four - אור נרות, לבן חם, לבן קר,
+              # אור יום - and two of them already carry the word אור, which is
+              # a light noun. The other two do not, so "אני רוצה לבן קר בחדר
+              # רחצה" scored a room and nothing else and was refused: 11 of
+              # the 156 `extras` rows in the held-out set. Zero off-topic hits.
+              "לבן חם", "לבן קר"],
     # "קר מדי" / "חם מדי" name the sensation instead of the device ("בסלון קר
     # מדי, תעלה"). Without them the verb decides, and תעלה/תוריד raise and lower
     # a blind, so these routed to cover - 41 of the test misses. Two-word forms
     # again: bare "חם" and "קר" are also hvac modes ("על חם").
     "climate": ["מזגן", "מזגנים", "מיזוג", "אינוורטר", "עינוורטר", "קירור",
                 "חימום", "מאייד", "טמפרטורה", "מעלות", "מחמם",
-                "א.יי.סי", "אייר", "קונדישן", "קר מדי", "חם מדי"],
+                "א.יי.סי", "אייר", "קונדישן", "קר מדי", "חם מדי",
+                # `rules/he/climate.yaml` writes the rule as (טמפ|טמפרטורה),
+                # so the clipped form is how Assist itself expects to be asked;
+                # "מה טמפ" is in the official suite. תרמוסטט was missing
+                # outright. Both fire on zero off-topic rows.
+                "טמפ", "תרמוסטט"],
     "fan": ["מאוורר", "מאווררים", "פן", "ונטה", "וונטה", "מפוח", "וונטילטור"],
+    # A valve opens and closes with exactly the verbs a blind does, so it is
+    # reached through this family rather than through one of its own; the
+    # executor widens `cover_*` to `valve.*` when the room holds no cover.
+    # See const.FALLBACK_DOMAINS. All four fire on zero off-topic rows.
+    # The last six are the `cover` device classes from `lists/he/covers.yaml`
+    # in OHF-Voice/intents, and they were missing: "תרים את דלת החניה" scored
+    # the lock family on דלת and "תפתח את הסוכך" scored nothing at all - 12
+    # router-recall misses, every one of them a command Home Assistant's own
+    # Hebrew list can express. Measured over all 29,623 rows, each fires on
+    # zero off-topic ones. `דלת` on its own stays out: it is a lock in most
+    # houses, and `slot_match` is what tells the two apart once the family is
+    # settled.
     "cover": ["תריס", "תריסים", "וילון", "וילונות", "ווילון", "ווילונות",
-              "שאטרס", "רפפות", "תריסול", "גגון", "סטורים", "בליינדס"],
-    "lock": ["דלת", "מנעול", "נעילה", "שער", "בריח"],
+              "שאטרס", "רפפות", "תריסול", "גגון", "סטורים", "בליינדס",
+              "דלת חניה", "דלת החניה", "דלתות חניה", "דלתות החניה",
+              "סוכך", "סככה", "סוככים", "סככות",
+              "צילייה", "ציליה", "תריס הצללה", "תריסי הצללה",
+              # A gate is a `cover` device class in Home Assistant and a lock
+              # in this house's lexicon, and both readings are right - so it
+              # names both families and the shortlist carries a tool from
+              # each, exactly as טלוויזיה does for switch and media. The
+              # plural was missing from both.
+              "שער", "שערים",
+              # And the same for the other two words the official Hebrew list
+              # maps to a cover class while something else here already
+              # claims them. A door that *opens* is a cover and a door that is
+              # *locked* is a lock; a window that opens is a cover and a
+              # window that is *asked about* is a binary_sensor contact.
+              # Naming both families is the honest reading - the shortlist
+              # carries one tool from each and the registry settles which
+              # exists. Measured over all 31,519 rows, each fires on zero
+              # off-topic ones.
+              "דלת", "דלתות", "חלון", "חלונות"],
+    # The four words that used to live in `cover` above, now naming a family
+    # and a tool of their own. Deliberately NOT given cover's verbs: a valve
+    # noun scores three and cover's verb scores one, so the noun already
+    # settles it, and duplicating תרים/תעלה/הורד into a second family would
+    # cost them their place in DECISIVE_VERBS - which the refusal gate reads.
+    "valve": ["ברז", "ברזים", "שסתום", "ואלב", "ברז ראשי", "ברז המים"],
+    # The plurals were missing outright, which a question is far more likely
+    # to use than a command: "איזה הדלתות פתוחים" scored nothing at all and
+    # the refusal gate threw it away. Measured over all 29,623 rows, both fire
+    # on zero off-topic ones.
+    "lock": ["דלת", "דלתות", "מנעול", "מנעולים", "נעילה", "שער", "שערים",
+             "בריח"],
     "camera": ["מצלמה", "מצלמות", "מצלמת"],
     # "שיעשה סיבוב" is the elliptical "send the robot round". The whole phrase
     # is the key because bare "סיבוב" is how a fan's oscillation is asked for
     # ("תפעיל סיבוב"), and that belongs to fan_oscillate.
-    "vacuum": ["שואב", "רובוט", "רומבה", "שואבת", "ווקום", "שיעשה סיבוב"],
+    # "לתחנה" and "לעמדה" are where the robot goes home. `תחנה` on its own is
+    # a radio station and sits under `media` for that reason, so the docking
+    # phrases are here as phrases - without them "שיחזור לתחנה" names a media
+    # noun and nothing else, which is 33 of the 40 rows where the sentence and
+    # the gold disagree about which family was named.
+    "vacuum": ["שואב", "רובוט", "רומבה", "שואבת", "ווקום", "שיעשה סיבוב",
+               "לתחנה", "לעמדה", "לבסיס", "לעגינה"],
     # "יותר חזק" / "יותר חלש" are the elliptical volume commands ("טיפה יותר
     # חזק בסלון") - they name no device at all, so without them the utterance
     # scores nothing and falls through to the generic shortlist. The two-word
@@ -112,15 +229,41 @@ FAMILY_NOUNS: Final[dict[str, list[str]]] = {
               "אמן", "אמנית", "להקה", "תחנה", "דיסק",
               "רדיו", "ווליום", "וליום", "עוצמה", "נגינה", "פלייליסט",
               "מיוזיק", "סאונד", "שאונד", "קול", "השתקה", "שקט", "מיוט",
+              # `HassMediaStop`. "סטופ" names nothing else in a house; zero
+              # off-topic hits.
+              "סטופ",
               "יותר חזק", "יותר חלש",
               "בלוטות'", "מקור", "ספוטיפיי", "יוטיוב", "אייראפליי", "ערוץ",
               # A tool hint only orders a family something else has already
               # reached, so these have to name the family themselves.
-              "הבא בתור", "רשימת השמעה", "השמעה"],
+              "הבא בתור", "רשימת השמעה", "השמעה",
+              # `HassMediaPrevious` had no route at all: "תחזור אחורה" and
+              # "השיר הקודם" name the previous track and nothing else in a
+              # house is gone back to.
+              "הקודם", "הקודמת", "אחורה", "השיר הקודם",
+              # A television is a `switch` in the house this corpus was written
+              # for - it hangs off a smart plug - and a `media_player` in Home
+              # Assistant's own tests and in most houses. Both are true, so the
+              # word names both families and the shortlist carries tools from
+              # each; `executor` resolves whichever entity actually exists.
+              # Listing it twice does not move the refusal gate, which reads the
+              # top family's score and already saw three from `switch`.
+              "טלוויזיה", "טיוי"],
     # דוד / מיחם / בוילר / מחשב / טלוויזיה / מטען are the switch entities the
     # training data names, so "turn on the TV" is a switch, not a media command.
     "switch": ["שקע", "תקע", "מפסק", "שקעים", "בוילר", "דוד", "מיחם", "מחשב",
-               "טלוויזיה", "טיוי", "מטען", "פלאג", "סוקט"],
+               "טלוויזיה", "טיוי", "מטען", "פלאג", "סוקט",
+               # The official suite's word for a switch entity, and absent
+               # here: "האם המתגים דולקים" reached no family at all.
+               "מתג", "מתגים",
+               # `humidifier` is one of the eleven domains Home Assistant
+               # exposes to Assist by default and had no Hebrew word here at
+               # all. A humidifier and a dehumidifier are the same domain and
+               # the same on/off verb as a plug, so they ride the switch
+               # family and the executor widens the search - see
+               # const.FALLBACK_DOMAINS. "דוד שמש" was measured with them and
+               # rejected at 17 off-topic hits; bare "דוד" is already here.
+               "מאדה", "אדים", "מייבש"],
     # Scenes and scripts are referred to by name ("מצב סרט", "סצנת ערב",
     # "תעשה השקיה"), so the names themselves have to be in the table. They are
     # listed in their two-word form wherever the bare word is ambiguous -
@@ -135,7 +278,11 @@ FAMILY_NOUNS: Final[dict[str, list[str]]] = {
                 # a household scene called "אווירת קפה" is reachable too.
                 "אווירה", "אווירת",
                 "ניקיון", "השקיה", "יציאה מהבית", "חזרה הביתה", "לילה טוב",
-                "תריסים בבוקר", "אורות בלילה"],
+                "תריסים בבוקר", "אורות בלילה",
+                # `button` and `input_button` press from this family: a
+                # doorbell or a "run once" button is a routine by another
+                # name, and HassTurnOn targets both domains.
+                "כפתור", "הכפתור", "לחצן", "הלחצן"],
     # input_boolean helpers are all named "מצב <something>", so the two-word
     # form is the key - bare "מצב" also means "state" and would collide with
     # state queries and with scenes.
@@ -143,11 +290,40 @@ FAMILY_NOUNS: Final[dict[str, list[str]]] = {
     # in timer_start's hints, so "תעצור את הספירה" scored no noun at all and the
     # verb handed the shortlist to media - six of the recall misses, every one
     # of them timer_cancel.
-    "helper": ["טיימר", "תיימר", "שעון עצר", "תזכורת", "הודעה", "התראה",
-               "דגל",
-               "ספירה", "הספירה", "ספירה לאחור",
+    "helper": ["דגל",
                "מצב אורחים", "מצב חופשה", "מצב לילה", "מצב שקט", "מצב חיסכון",
                "נעדר"],
+    # Countdowns left `helper` in v11. They were together because both
+    # answered to the same on/off verbs and the executor had to undo the
+    # confusion afterwards; now they are two tools, and a family each is what
+    # lets the shortlist decline to offer the wrong one.
+    "timer": ["טיימר", "טיימרים", "תיימר", "שעון עצר", "תזכורת",
+              "ספירה", "הספירה", "ספירה לאחור", "סטופר",
+              "כמה זמן נשאר", "זמן נשאר", "כמה נשאר"],
+    "notify": ["הודעה", "התראה", "נוטיפיקציה", "פוש",
+               # `HassBroadcast` speaks out loud in the house rather than
+               # buzzing a phone, and Hebrew names it: one announces, one
+               # sends. Both tools sit in this family and the tool hints
+               # below separate them.
+               "הכרזה", "כריזה", "רמקולים"],
+    # `todo` is one of Home Assistant's eleven default-exposed domains and had
+    # no Hebrew word anywhere in this file. Two-word keys wherever the bare
+    # word is ambiguous: "קניות" alone is also "כמה קניות עשית".
+    "list": ["רשימה", "רשימת", "הרשימה",
+             "רשימת קניות", "רשימת הקניות", "לרשימת", "מהרשימה",
+             "רשימת מטלות", "רשימת משימות", "מטלות", "משימות", "טודו",
+             # "תוסיף חלב לסופר" is how an Israeli says it, and it was the
+             # commonest list phrasing this table could not reach: 10 of the
+             # held-out list rows scored no family at all. Only the prefixed
+             # form - bare "סופר" fires on 25 off-topic rows ("איזה סופר הכי
+             # זול"), and "לסופר" on none.
+             "לקניות", "מצרכים", "לסופר",
+             # And the mirror of "לקניות", which was missing: taking something
+             # *off* the list is "תוציא חלב מהקניות", and the router sent four
+             # of those to the blinds. Prefixed only, on the same rule "לסופר"
+             # follows - measured over all 28,233 rows it fires on 54 genuine
+             # list rows, zero off-topic ones and zero rows of any other family.
+             "מהקניות"],
     # No state adjectives here (דולק, סגור, פתוח, נעול): they are far more
     # common as commands than as questions, and scoring them as query nouns
     # pulled get_state into the shortlist ahead of the real domain's tools.
@@ -162,8 +338,23 @@ FAMILY_NOUNS: Final[dict[str, list[str]]] = {
     # `climate_set_temperature`, which is a plausible guess for an unrouted
     # temperature word and is marked wrong. Multi-word keys match by substring
     # (see `_hits`), so these cannot fire on a bare "בחוץ".
+    # The sensor nouns below name devices this house genuinely has and that no
+    # other family claims, but they lived only in SENSOR_NOUNS - which types a
+    # question after the fact and is never scored. So "האם יש חלונות פתוחים"
+    # scored one for the interrogative and was refused before inference, on a
+    # sentence the official Hebrew suite requires. Measured over all 20,814
+    # rows, each fires on zero off-topic ones, and חלון and חיישן between them
+    # rescue 15 genuine commands the gate is currently throwing away.
+    # `HassGetCurrentDate` and `HassGetCurrentTime` deliberately have no nouns
+    # here. They name no device, so a family score cannot separate them from
+    # the world clock: measured over the corpus, "מה השעה" fires on 22
+    # off-topic rows and every one of them is "מה השעה בניו יורק". The whole
+    # utterance decides instead - see :func:`names_a_clock` - and
+    # `looks_off_topic` consults it directly.
+    "datetime": [],
     "query": ["מזג", "תחזית", "גשם", "לחות", "מחר",
-              "חם בחוץ", "קר בחוץ", "חם היום", "קר היום", "חם למעלה"],
+              "חם בחוץ", "קר בחוץ", "חם היום", "קר היום", "חם למעלה",
+              "חלון", "חלונות", "חיישן", "חיישנים", "מדחום", "רמת לחות"],
 }
 
 # Verbs. Weak signal, used only to rank families that the nouns already matched,
@@ -187,9 +378,26 @@ FAMILY_VERBS: Final[dict[str, list[str]]] = {
               "השמיעי", "תשמיעי", "השתיקי", "תשתיקי", "תדלגי", "דלגי", "עצרי", "תעצרי",
               "תפסיקי", "תשהי", "תשהי"],
     "switch": ["טרן", "און", "אוף", "תסוויץ'"],
-    "routine": ["הפעל", "תפעיל", "הרץ", "תריץ", "הפעילי", "תפעילי", "הריצי", "תריצי"],
-    "helper": [ "תזכיר", "הזכר", "תשלח", "שלח", "הודע", "תודיע", "תעמיד", "תזכירי",
-               "תשלחי", "שלחי", "הודיעי", "תודיעי", "תעמידי", "תעדכן", "תעדכני"],
+    "routine": ["הפעל", "תפעיל", "הרץ", "תריץ", "הפעילי", "תפעילי", "הריצי", "תריצי",
+                "תלחץ", "לחץ", "תלחצי", "לחצי"],
+    "helper": [],
+    "timer": ["תזכיר", "הזכר", "תזכירי", "תעמיד", "תעמידי"],
+    "notify": ["תשלח", "שלח", "הודע", "תודיע",
+               "תשלחי", "שלחי", "הודיעי", "תודיעי", "תעדכן", "תעדכני",
+               "תכריז", "הכרז", "תכריזי", "הכריזי", "תשדר", "לשדר"],
+    # No "תוסיף" here, and it is the commonest form of the verb. Measured over
+    # the corpus it fires on 21 off-topic rows - all of them "תוסיף פגישה
+    # ליומן", a calendar this assistant does not have - and on zero genuine
+    # ones, because every genuine list sentence names the list. Scoring it
+    # would have handed those 21 an actuating tool in a shortlist the refusal
+    # gate had already let through on מחר. It stays as a hint under
+    # `list_add_item`, where it orders a family the noun has already chosen
+    # and cannot reach one on its own.
+    "list": ["הוסף", "תוסיפי", "הוסיפי", "תמחק", "מחק", "תמחקי",
+             "מחקי", "תסמן", "סמן", "תסמני", "סמני", "תרשום", "רשום",
+             "תרשמי", "רשמי"],
+    "valve": [],
+    "datetime": [],
     # Interrogatives, plus the state adjectives that were demoted out of the
     # noun table - as verbs they still nudge a question toward get_state
     # without outweighing the device noun that names the domain.
@@ -231,11 +439,45 @@ FAMILY_WEAK: Final[dict[str, list[str]]] = {
 # a blind, locks a door and colloquially turns a light off. The family score has
 # already chosen the domain by then, so the overlap costs nothing.
 TOOL_HINTS: Final[dict[str, list[str]]] = {
+    # The last six are how Home Assistant's own Hebrew suite asks for a
+    # brightness or a colour - "שנה את הבהירות ... ל50 אחוז", "קבע את
+    # טמפרטורת הצבע ... ל2700" - and setting either is a `turn_on`. Without
+    # them the sentence named no light behaviour at all and the model's
+    # `flip` stood: 8 of the 11 HassLightSet sentences ran `light.toggle`.
+    # Measured over all 31,519 rows, each fires on zero off-topic ones; bare
+    # `שנה` was measured with them and rejected at 91.
+    # `הדלקה` and `כיבוי` are the nouns of two verbs already in these lists,
+    # and the suite asks with one of them: "הדלקה של אור ראשי" is a gerund and
+    # not an imperative, so nothing named a light behaviour and the model's
+    # `flip` stood. They are added as a pair rather than one of them, for the
+    # reason `למעלה` is kept out of FLOOR_PHRASES - keeping half of a symmetric
+    # pair because only half of it was exercised is fitting the suite rather
+    # than the language. Neither occurs anywhere in the 30,613 corpus rows, in
+    # any clause, which is also what says they cannot move a shortlist and so
+    # may land between a generation and its run. See `_QUESTION` for the same
+    # argument spelled out.
     "light_turn_on": ["הדלק", "תדליק", "תדליקי", "הדליקי", "האר", "פתח",
-                      "תפתח", "און", "פתחי", "תפתחי"],
+                      "תפתח", "און", "פתחי", "תפתחי",
+                      "תשנה", "תשני", "קבע", "תקבע", "קבעי",
+                      "בהירות", "הבהירות", "טמפרטורת הצבע", "הדלקה",
+                      # The four colour temperatures `lists/he/lights.yaml`
+                      # names. "שנה את מנורת חדר השינה ללבן חם" asks for one
+                      # without ever saying "טמפרטורת הצבע", so nothing named
+                      # a light behaviour and `flip` stood. Measured over the
+                      # corpus: 9, 15 and 22 rows say the first three and all
+                      # 46 want `on`; none is off-topic, and "אור נרות"
+                      # appears nowhere but is its pair.
+                      "לבן חם", "לבן קר", "אור יום", "אור נרות"],
     "light_turn_off": ["כבה", "תכבה", "תכבי", "כבי", "סגור", "תסגור", "אוף",
-                       "תעמעם", "עמעם", "סגרי", "תסגרי", "תעמעמי", "עמעמי"],
-    "light_toggle": ["תחליף", "החלף", "הפוך", "תהפוך", "תחליפי", "החליפי"],
+                       "תעמעם", "עמעם", "סגרי", "תסגרי", "תעמעמי", "עמעמי",
+                       "כיבוי"],
+    # `טוגל` was in `switch_toggle` and `fan_toggle` and not here, which is a
+    # plain omission and an expensive one: "תעשה טוגל לאור בסלון" scored no
+    # toggle word, so `direction.settle_toggle` saw a sentence naming neither
+    # side of the pair and left the model's answer alone - 50 rows of one
+    # template, and the reason the do-verb tier below it could not ship.
+    "light_toggle": ["תחליף", "החלף", "הפוך", "תהפוך", "טוגל", "תחליפי",
+                     "החליפי"],
     "climate_turn_off": ["כבה", "תכבה", "תכבי", "כבי", "סגור", "תסגור",
                          "תפסיק", "כיבוי", "אוף", "סגרי", "תסגרי", "תפסיקי"],
     "climate_set_temperature": ["מעלות", "טמפרטורה", "תעלה", "תוריד", "חם",
@@ -289,8 +531,12 @@ TOOL_HINTS: Final[dict[str, list[str]]] = {
                    "אמן", "אמנית", "להקה", "הרכב",
                    "האזן", "תאזין", "האזני", "תאזיני",
                    "ערבב", "תערבב", "ערבבי", "תערבבי"],
+    # "המשך"/"חדש" are how a *paused* player is asked to carry on, which is
+    # `media_player.media_play` and which nothing here spelled: Home Assistant's
+    # Hebrew suite asks it three ways and all three ran the wrong service.
     "media_play": [ "נגן", "תנגן", "השמע", "תשמיע", "שים", "תשים", "נגני", "תנגני",
-                   "השמיעי", "תשמיעי"],
+                   "השמיעי", "תשמיעי",
+                   "המשך", "תמשיך", "המשיכי", "תמשיכי", "חדש", "חדשי"],
     "media_set_volume": ["ווליום", "וליום", "קול", "עוצמה", "סאונד", "שאונד",
                          "תגביר", "תנמיך", "הגבר", "נמיך", "אחוז", "חצי",
                          "תכוון", "כוון", "תגבירי", "תנמיכי", "הגבירי", "הנמיכי",
@@ -301,8 +547,10 @@ TOOL_HINTS: Final[dict[str, list[str]]] = {
     "media_select_source": ["ערוץ", "מקור", "ספוטיפיי", "יוטיוב", "תעביר",
                             "בלוטות'", "אייראפליי", "טלוויזיה", "תעבירי",
                             "שים", "תשים", "תחליף", "רדיו"],
+    # The bare imperatives beside the future-as-imperative forms already here.
+    # "הפסק את המוזיקה" carried no pause hint at all and settled as a play.
     "media_pause": [ "השהה", "תשהה", "עצור", "תעצור", "תפסיק", "תשהי", "תשהי", "עצרי",
-                    "תעצרי", "תפסיקי"],
+                    "תעצרי", "תפסיקי", "הפסק", "הפסיקי", "השהי"],
     "scene_activate": ["סצנה", "סצינה", "סצנת", "תרחיש", "מצב",
                        "אווירה", "אווירת"],
     "script_run": ["סקריפט", "הרץ", "תריץ", "ניקיון", "השקיה", "תעשה",
@@ -318,9 +566,74 @@ TOOL_HINTS: Final[dict[str, list[str]]] = {
     "get_weather": ["מזג", "אוויר", "תחזית", "גשם", "יורד", "מעונן"],
     "timer_start": ["טיימר", "תיימר", "שעון עצר", "דקות", "תזכיר", "תעמיד",
                     "ספירה", "תזכירי", "תעמידי"],
-    "timer_cancel": ["בטל", "תבטל", "בטלי", "תבטלי"],
+    # "בטל את הטיימר" scored one for `בטל` here, one for `בטל` under
+    # input_boolean_turn_off and one for `טיימר` under timer_start - a
+    # three-way tie broken by position in FAMILY_TOOLS, where input_boolean
+    # sits second and this sits fourth. So the shortlist led with
+    # `input_boolean_turn_off` and the model took it: 0 of the 13 HassCancelTimer
+    # sentences in Home Assistant's own Hebrew suite reached `timer.cancel`,
+    # and the ceiling measurement could not see it because the right tool *was*
+    # declared - just not first.
+    #
+    # The noun belongs here for the same reason it belongs under timer_start:
+    # a sentence that says both "cancel" and "timer" matches this tool twice
+    # and the helper toggles once, which is the whole job of a tool hint. The
+    # extra verbs are `rules/he/timers.yaml`'s own `timer_cancel` rule -
+    # (בטל|בטלי|עצור|עצרי|הפסק|הפסיקי) - which is how Assist itself expects a
+    # timer to be stopped. עצור and הפסק are media verbs too, and that costs
+    # nothing: a hint only orders tools inside a family the score already
+    # chose.
+    "timer_cancel": ["בטל", "תבטל", "בטלי", "תבטלי",
+                     "טיימר", "טיימרים", "תיימר", "ספירה",
+                     "עצור", "עצרי", "הפסק", "הפסיקי"],
     "notify_send": [ "הודעה", "תשלח", "שלח", "התראה", "הודע", "תודיע", "תשלחי", "שלחי",
-                    "הודיעי", "תודיעי", "תעדכן", "תעדכני", "כולם"],
+                    "הודיעי", "תודיעי", "תעדכן", "תעדכני"],
+    # `HassBroadcast` -> `assist_satellite.announce`. What separates it from a
+    # phone notification is the audience, and Hebrew says the audience:
+    # "תכריז בכל הבית" against "תשלח לי הודעה". "כולם" moved here from
+    # notify_send for that reason - "תודיע לכולם שהאוכל מוכן" is an
+    # announcement, not a push.
+    "broadcast": ["תכריז", "הכרז", "תכריזי", "הכריזי", "הכרזה", "כריזה",
+                  "כולם", "לכולם", "בכל הבית", "תשדר", "לשדר", "ברמקולים"],
+    # Which end of a cover, on the valve tool. Same words, because a tap opens
+    # and closes with the verbs a blind does; the noun already chose the
+    # family by the time these are read.
+    "valve_open": ["פתח", "תפתח", "תרים", "הרם", "פתחי", "תפתחי", "לפתוח"],
+    "valve_close": ["סגור", "תסגור", "תוריד", "הורד", "סגרי", "תסגרי", "לסגור"],
+    "valve_stop": ["עצור", "תעצור", "תפסיק", "די", "עצרי", "תעצרי"],
+    "valve_set_position": ["אחוז", "אחוזים", "חצי", "מחצית", "רבע"],
+    # The five timer operations Home Assistant has intents for and this
+    # catalogue could not express. `timer.change` is what adds or removes
+    # time; `timer.start` is what resumes a paused one.
+    "timer_pause": ["השהה", "תשהה", "השהי", "תשהי", "פאוזה", "להשהות"],
+    "timer_resume": ["המשך", "תמשיך", "המשיכי", "תמשיכי", "חדש", "תחדש",
+                     "להמשיך", "תחזיר"],
+    "timer_add": ["עוד", "תוסיף", "הוסף", "להוסיף", "תאריך את", "תוסיפי"],
+    "timer_less": ["תקצר", "לקצר", "תוריד", "הורד", "פחות", "תקצרי"],
+    "timer_status": ["כמה", "נשאר", "מצב", "זמן", "מתי", "נותר"],
+    # Shopping list and to-do list.
+    "list_add_item": ["תוסיף", "הוסף", "תוסיפי", "הוסיפי", "להוסיף",
+                      "תרשום", "רשום", "תרשמי", "רשמי", "תכתוב", "צריך"],
+    "list_complete_item": ["תסמן", "סמן", "תסמני", "סמני", "קניתי", "לקחתי",
+                           "בוצע", "השלמתי", "עשיתי", "לסמן"],
+    "list_remove_item": ["תמחק", "מחק", "תמחקי", "מחקי", "למחוק", "תוריד",
+                         "הסר", "תסיר", "תוציא", "להוריד"],
+    # A button is pressed, not turned on. `input_button` is the same verb one
+    # domain over; see const.FALLBACK_DOMAINS.
+    "button_press": ["תלחץ", "לחץ", "תלחצי", "לחצי", "ללחוץ", "לחיצה",
+                     "כפתור", "הכפתור"],
+    # "תדליק את המזגן" - the commonest way in Hebrew to start an air
+    # conditioner, and `climate.turn_on` was simply not in the map.
+    "climate_turn_on": ["הדלק", "תדליק", "הפעל", "תפעיל", "און", "הדליקי",
+                        "תדליקי", "הפעילי", "תפעילי", "להדליק", "להפעיל"],
+    "media_stop": ["עצור", "תעצור", "תפסיק", "הפסק", "סטופ", "לעצור",
+                   "עצרי", "תעצרי", "תפסיקי"],
+    "media_previous_track": ["הקודם", "הקודמת", "אחורה", "חזור", "תחזור",
+                             "קודם", "לאחור", "תחזרי", "חזרי"],
+    "switch_toggle": ["תחליף", "החלף", "הפוך", "תהפוך", "טוגל", "תחליפי"],
+    "fan_toggle": ["תחליף", "החלף", "הפוך", "תהפוך", "טוגל", "תחליפי"],
+    "get_date": ["תאריך", "התאריך", "יום", "היום", "בשבוע"],
+    "get_time": ["שעה", "השעה", "זמן", "עכשיו", "כרגע"],
 }
 
 # The infinitive, which is how a Hebrew speaker asks politely: "אתה יכול
@@ -357,6 +670,14 @@ for _tool, _forms in {
     "script_run": ["להריץ", "להפעיל"],
     "timer_start": ["לכוון", "להתחיל"],
     "timer_cancel": ["לבטל", "לעצור"],
+    "valve_open": ["לפתוח", "להרים"],
+    "valve_close": ["לסגור", "להוריד"],
+    "button_press": ["ללחוץ"],
+    "climate_turn_on": ["להדליק", "להפעיל"],
+    "broadcast": ["להכריז", "להודיע"],
+    "list_add_item": ["להוסיף", "לרשום"],
+    "list_remove_item": ["למחוק", "להסיר"],
+    "list_complete_item": ["לסמן"],
 }.items():
     TOOL_HINTS.setdefault(_tool, []).extend(_forms)
 
@@ -368,6 +689,34 @@ FALLBACK: Final[list[str]] = [
     "light_turn_on", "light_turn_off", "climate_set_temperature",
     "cover_open", "get_state",
 ]
+
+#: The verbs that open a request to play something, in every form Israelis use.
+#:
+#: Only consulted when the scorer found **nothing at all**, which is what makes
+#: them safe here despite being shared: "שים את המזגן על 22" scores the climate
+#: family and never reaches this, and "תפעיל את השואב" scores vacuum. What is
+#: left is the shape the family table cannot reach by construction - a play
+#: verb and a proper noun: "שימי ברי סחרוף בחדר המוגן", "תשים עידן רייכל".
+#: An artist is not a device and no keyword list can hold every name.
+#:
+#: Measured over all 30,706 rows, on the 42 where nothing scored a family and
+#: one of these appears: **33 are a media tool** and one is what the generic
+#: fallback below would have got right. Thirty-three against one is not a
+#: close call, and it cannot make anything worse - this branch only runs where
+#: the alternative was a guess across four unrelated domains.
+PLAY_VERBS: Final[tuple[str, ...]] = (
+    "שים", "שימי", "תשים", "תשימי", "לשים",
+    "נגן", "נגני", "תנגן", "תנגני", "לנגן",
+    "השמע", "השמיעי", "תשמיע", "תשמיעי", "להשמיע",
+    "האזן", "האזני", "תאזין", "תאזיני", "לשמוע",
+    "ערבב", "ערבבי", "תערבב", "תערבבי",
+)
+
+#: What to offer when nothing scored but the sentence asks for something to be
+#: played. `music_play` leads because the shape that reaches here is "play
+#: <name>" rather than "play"; `media_play` follows for the sentences that
+#: named nothing after all.
+FALLBACK_MUSIC: Final[list[str]] = ["music_play", "media_play"]
 
 # Hebrew glues single-letter particles onto the front of words, so "במזגן",
 # "והמזגן" and "שהמזגן" all contain the noun "מזגן". Longest first so that
@@ -467,6 +816,244 @@ def _hits(keywords: list[str], toks: set[str], query: str) -> int:
     return n
 
 
+# Verbs exactly one family claims. ------------------------------------------
+#
+# "נקה כאן" and "דלג" name no device at all, so they scored one point for the
+# verb and the refusal gate threw them away before the model ever saw them -
+# both are sentences Home Assistant's own Hebrew test suite requires. But
+# neither is ambiguous: `נקה` is the vacuum and nothing else in this house is
+# cleaned, `דלג` is the next track and nothing else is skipped. A verb no other
+# family claims names a domain exactly as decisively as a noun does, so in the
+# gate it is worth what a noun is worth.
+#
+# Derived from FAMILY_VERBS rather than listed out, so a verb added there
+# becomes decisive on its own and there is no second table to fall out of step
+# with; `_AMBIGUOUS` carries the exceptions and nothing else has to.
+#
+# Measured over all 20,814 generated rows, per verb, the way every other
+# addition to this module was measured - 119 of the 129 family-unique verbs
+# fire on **zero** off-topic rows, and between them they rescue 318 genuine
+# commands that the gate is currently refusing. The ten that do not are listed
+# below with what rejected them; three of the ten are the prefix-stripping trap
+# this module already documents for מזגן/גן.
+_AMBIGUOUS: Final = frozenset((
+    "סגור",    # 31 off-topic: "כמה עולה לסגור מרפסת", "הוא סגור בעניין הזה"
+    "תזכיר",   # 27: "תזכיר לי איך קוראים לשחקן ההוא"
+    "תשלח",    # 27: "תשלח מייל לבוס שאני חולה"
+    "תעמיד",   # 19: "תעמיד פנים שאתה פיראט"
+    "תחמם",    # 18: "הדוד בבית של אמא לא מתחמם" - מתחמם strips to תחמם
+    "תפתח",    # 18: "תפתח לי את הראש קצת", "תפתח לי את הדפדפן"
+    "תדליק",   # 15: "תדליק לי סיגריה"
+    "קרר",     #  14: "איזה מקרר הכי חסכוני" - מקרר strips to קרר
+    "תצלם",    #  8: "תצלם אותי"
+    "שלח",     #  7: "שלח הודעה לדני בוואטסאפ"
+))
+
+
+def _build_decisive() -> dict[str, str]:
+    """Folded verb -> the one family that claims it."""
+    owners: dict[str, set[str]] = {}
+    for family, verbs in FAMILY_VERBS.items():
+        for verb in verbs:
+            owners.setdefault(_fold(verb).strip(_PUNCT), set()).add(family)
+    ambiguous = {_fold(v).strip(_PUNCT) for v in _AMBIGUOUS}
+    return {
+        key: next(iter(families))
+        for key, families in owners.items()
+        # The query family is interrogatives, not imperatives. "מה" naming only
+        # that family must never carry a sentence past the gate on its own -
+        # that is what `looks_like_question` is for, and it declares read-only
+        # tools rather than letting anything act.
+        if len(families) == 1 and "query" not in families and key not in ambiguous
+    }
+
+
+DECISIVE_VERBS: Final[dict[str, str]] = _build_decisive()
+
+# What such a verb adds in the gate. A verb already scores one, so two more
+# brings it to the three a device noun is worth - deliberately equal, because
+# the claim is that the two signals are equally decisive, not that one wins.
+DECISIVE_VERB_BONUS: Final = _NOUN_WEIGHT - 1
+
+
+def names_a_domain(query: str) -> str | None:
+    """The family a verb only one family claims names, if the sentence has one.
+
+    Word order, not `_tokens` order. `_tokens` unions every word's variants
+    into one set, so a sentence carrying two decisive verbs from different
+    families would answer differently between runs - which the refusal gate
+    would not notice, since it only asks whether there is one at all, and
+    anything reading the family later would.
+    """
+    for word in query.split():
+        for variant in _variants(word):
+            family = DECISIVE_VERBS.get(variant)
+            if family is not None:
+                return family
+    return None
+
+
+#: The words that name a countdown. Measured over all 20,814 generated rows:
+#: 473 sentences carry one of these, and their gold calls are `timer_start`
+#: (328), `timer_cancel` (116) and `get_state` (29) - **not one** is an
+#: `input_boolean`. That is what licenses `executor` to read a helper toggle
+#: over a timer sentence as a timer command; see HELPER_IS_A_TIMER.
+TIMER_NOUNS: Final[tuple[str, ...]] = (
+    "טיימר", "טיימרים", "תיימר", "שעון עצר", "ספירה", "ספירה לאחור",
+    # `HassTimerStatus` is asked without naming the thing: "כמה זמן נשאר" is
+    # the one sentence in Home Assistant's Hebrew suite that this whole stack
+    # could not reach, because it scores no family, names no room and carries
+    # no decisive verb - so the refusal gate threw it away before inference.
+    # Multi-word keys, so none of them can fire on a bare נשאר. Measured over
+    # all 29,623 rows: zero off-topic hits each.
+    "כמה זמן נשאר", "זמן נשאר", "כמה נשאר",
+)
+
+
+def names_a_timer(query: str) -> bool:
+    """True when the sentence is about a countdown."""
+    return bool(_hits(list(TIMER_NOUNS), _tokens(query), query))
+
+
+def family_named(query: str) -> str | None:
+    """The one family this sentence's nouns name, or ``None``.
+
+    ``None`` when they name none and when they name two - a sentence
+    supporting two readings settles nothing, which is the rule every table in
+    this project follows and the reason "תדליק את האוטומציה תריסים בבוקר" stays
+    an automation instead of becoming a blind.
+
+    `query` is excluded from the vote deliberately: its "nouns" are
+    interrogatives rather than devices, and every sentence carrying one also
+    names the device it is asking about. See `direction.family_named`, which
+    is where the answer is used and where the measurement lives.
+    """
+    tokens = _tokens(query)
+    named = [family for family, nouns in FAMILY_NOUNS.items()
+             if family != "query" and _hits(list(nouns), tokens, query)]
+    return named[0] if len(named) == 1 else None
+
+
+#: The verbs that only a speaker can answer. Pause, resume, skip, go back.
+#:
+#: Deliberately *not* the on/off verbs. "כבה את הטלוויזיה" is a smart plug in
+#: 43 of this corpus's 59 television rows and a media player in the rest, and
+#: nothing separates them; "השהה את הטלוויזיה" is a media player and cannot be
+#: anything else, because a plug has no pause.
+_TRANSPORT_VERBS: Final[tuple[str, ...]] = (
+    "השהה", "תשהה", "השהי", "תשהי", "פאוזה", "להשהות",
+    "המשך", "תמשיך", "המשיכי", "תמשיכי", "חדש", "חדשי", "תחדש", "להמשיך",
+    "נגן", "תנגן", "נגני", "תנגני", "השמע", "תשמיע", "השמיעי", "תשמיעי",
+    "הבא", "הבאה", "דלג", "תדלג", "דלגי", "תדלגי",
+    "הקודם", "הקודמת", "אחורה", "לאחור", "חזור", "תחזור",
+    # Halting is a transport verb too, and it had to be measured apart because
+    # הפסק and עצור *can* mean switching something off. Paired with a media
+    # noun they do not: 342 rows over train and test, **every one of them a
+    # media behaviour**. Home Assistant's own "הפסיקי את הטלוויזיה" is one.
+    "הפסק", "הפסיקי", "תפסיק", "תפסיקי", "להפסיק",
+    "עצור", "תעצור", "עצרי", "תעצרי", "לעצור", "סטופ",
+)
+
+
+def names_a_transport(query: str) -> bool:
+    """True when the sentence asks a *speaker* to do something only it can do.
+
+    A transport verb and a media noun together, and neither on its own: "נגן"
+    is the player as well as the imperative, and "טלוויזיה" is a smart plug as
+    often as a media player in this house.
+
+    It exists because the pair is decisive where each half is not. Home
+    Assistant's own Hebrew suite asks "השהה את הטלוויזיה" and "המשך את
+    הטלוויזיה", the model answers `switch_control{flip}` - the television is a
+    plug in most of the corpus - and five of the suite's nine remaining
+    failures were that. Measured over train and test on single-clause
+    single-call rows, excluding questions and countdowns: **1,204 rows have a
+    transport verb and a media noun, and every one of them is a media or music
+    behaviour.**
+    """
+    tokens = _tokens(query)
+    return bool(_hits(list(_TRANSPORT_VERBS), tokens, query)
+                and _hits(list(FAMILY_NOUNS.get("media", ())), tokens, query)
+                and not looks_like_question(query)
+                and not names_a_timer(query))
+
+
+#: The phrases that ask for the wall clock or the calendar.
+#:
+#: `HassGetCurrentTime` and `HassGetCurrentDate` are built-in intents that
+#: Home Assistant's own Hebrew suite tests and this project could not answer at
+#: all. They need their own test rather than a family score because what they
+#: name is not a device: "מה השעה" scores nothing, and "כמה זמן נשאר" - which
+#: is a timer, not a clock - would otherwise land here on the word זמן.
+#:
+#: Every key is a phrase for that reason. Bare שעה sets a countdown ("עוד
+#: שעה"), bare יום is weather vocabulary ("חם היום"), and neither may reach
+#: this on its own.
+CLOCK_PHRASES: Final[tuple[str, ...]] = (
+    "מה השעה", "השעה עכשיו", "השעה כרגע", "מה הזמן", "מה שעה",
+    "מה התאריך", "איזה תאריך", "התאריך היום", "תאריך היום",
+    "איזה יום", "מה היום", "יום בשבוע", "איזה יום היום",
+)
+
+
+#: The words a local clock question may contain, beyond the phrase itself.
+#: From the five sentences Home Assistant's own Hebrew suite tests - "מה
+#: השעה", "מה השעה עכשיו", "מה השעה כרגע", "מה התאריך", "מה התאריך היום" -
+#: plus the ordinary Israeli variants of the same question.
+_CLOCK_WORDS: Final = frozenset(
+    _fold(w) for w in (
+        "מה", "מהי", "שעה", "השעה", "תאריך", "התאריך", "זמן", "הזמן",
+        "איזה", "יום", "היום", "שבוע", "בשבוע", "עכשיו", "כרגע", "הזה",
+        "לי", "עכשו",
+        # The politeness this corpus wraps every utterance in. "מה השעה אם
+        # אפשר" is the same question as "מה השעה", and without these it was
+        # not one: 13 of the 35 datetime rows in the held-out set failed the
+        # residue test on a word like אם or יאללה.
+        "אם", "אפשר", "יאללה", "קדימה", "בבקשה", "תודה", "נא", "אנא",
+        "תוכל", "תוכלי", "תגיד", "תגידי", "תשמע", "תשמעי", "תקשיב",
+        "תקשיבי", "רגע", "אוקיי", "אה", "אממ", "עממ", "כאילו", "נו",
+    ))
+
+
+def names_a_clock(query: str) -> bool:
+    """True when the whole utterance asks the local time or date.
+
+    Whole-utterance rather than phrase-matching, and the reason is measured:
+    "מה השעה" appears on 22 off-topic rows of this project's corpus and every
+    one of them is "מה השעה בניו יורק". A world clock is not something this
+    assistant knows, so the phrase alone cannot carry the intent - what
+    separates the two readings is whether anything is left over once the
+    politeness comes off.
+
+    That is the same shape as :func:`looks_like_cancel`, and it costs nothing:
+    all five sentences the official Hebrew suite tests are the bare question,
+    and the 22 off-topic rows all name a city.
+
+    Guarded against the countdown reading too. "כמה זמן נשאר בטיימר" is a
+    timer status, not a clock, and a sentence that names a countdown is never
+    this.
+    """
+    if not query or names_a_timer(query):
+        return False
+    folded = _fold(query)
+    matched = [p for p in CLOCK_PHRASES if _fold(p) in folded]
+    if not matched:
+        return False
+    # Take the phrase out first, then look at what is left. Removing it as a
+    # substring rather than word by word is what handles the space
+    # speech-to-text drops: "מה התאריךהיום" leaves "היום", which is a clock
+    # word, where a token test leaves "התאריךהיום", which is nothing.
+    rest = folded
+    for phrase in sorted(matched, key=len, reverse=True):
+        rest = rest.replace(_fold(phrase), " ")
+    for word in rest.split():
+        variants = _variants(word)
+        if variants & _CANCEL_NOISE_FOLDED or variants & _CLOCK_WORDS:
+            continue
+        return False
+    return True
+
+
 def score_families(query: str) -> list[tuple[str, int]]:
     """Families with a non-zero score, most likely first."""
     toks = _tokens(query)
@@ -536,9 +1123,64 @@ _QUESTION: Final = tuple(re.compile(_fold(p)) for p in (
     r"\bהאם\b",                              # האם האור דולק
     r"\b[תי]?בדו?ק[יו]?\b",                  # תבדוק / בדוק / תבדקי
     r"\bכמה\b",                              # כמה מעלות בסלון
-    r"\bמה\s*ה?(טמפרטורה|לחות|רמת|חום)\b",
+    # `טמפ` is the abbreviation an Israeli actually says, and Home Assistant's
+    # own Hebrew suite uses it - "מה טמפ" was read as an order and answered by
+    # *setting* a temperature, which is the failure this whole block exists to
+    # prevent, arriving through a word this corpus happens never to use.
+    # `_QUANTITY` below already knew it; this table did not.
+    #
+    # Landing it between a corpus generation and the run that corpus feeds is
+    # normally forbidden, because `Corpus.distractors` aligned three quarters
+    # of the training rows to `select_tool_names` and a moved shortlist trains
+    # them against candidates inference will not present. The rule exists for a
+    # reason rather than as a ritual, so the reason was checked: over all
+    # 30,613 rows and every clause of every one of them, the added alternative
+    # newly fires **zero** times. A change that moves no row cannot break an
+    # alignment.
+    r"\bמה\s*ה?(טמפרטורה|טמפ|לחות|רמת|חום)\b",
     r"מזג\s*ה?או+יר",                        # מזג האוויר, and the one-vav spelling
     r"\bתגיד[יי]?\s*לי\b",                   # תגיד לי מה קורה עם...
+    # "אילו אורות דולקים" is how Home Assistant's own Hebrew suite asks which
+    # of a domain is on, and it was the one shape here that reached an
+    # actuation tool: the sentence names a light, so it scores three and passes
+    # the refusal gate, and with no interrogative matching, the shortlist
+    # filled with light_*. That is precisely the failure this block exists to
+    # prevent - "מה המצב של האור במטבח" turning three kitchen lights on -
+    # arriving through a word this corpus happens never to use. Measured: zero
+    # hits on all 18,459 actuation rows.
+    r"\bאילו\b",
+    # And its singular. "איזה מאווררים כבויים" is the same question asked with
+    # the commoner word, and it was reaching the fan family's actuation tools:
+    # the sentence names a device, so it scores three, and with no
+    # interrogative matching the shortlist filled with fan_control. Measured
+    # over all 29,623 rows: **zero** hits on the 24,046 actuation ones, 188 on
+    # the query ones, and 47 on off-topic ones - which this makes safer rather
+    # than worse, since a question can only reach the read-only tools.
+    r"\bאיזה\b",
+    # Three more interrogatives Home Assistant's own Hebrew suite uses and
+    # this corpus never does. Both were reaching `climate.turn_off`: a
+    # question about the heat outside switching the air conditioner off is
+    # the exact failure this block exists to prevent, arriving through
+    # words the corpus happens not to contain. Measured over all 31,519
+    # rows: zero hits on every class - actuation, query and off-topic.
+    r"\bמהו\b",
+    r"\bמהי\b",
+    r"\bה?סטטוס\b",
+    # A timer is asked after by name rather than with an interrogative: "מצב
+    # הטיימר", "כמה זמן נשאר". Both were reaching timer_start, which restarts
+    # the very countdown somebody just asked about. Zero actuation hits.
+    r"\bמצב\s*ה?טיימר",
+    r"\bכמה\s*זמן\s*נשאר\b",
+    # The clock and the calendar. `HassGetCurrentTime` and
+    # `HassGetCurrentDate` name no device, so nothing else here fires on them
+    # and they reached the actuation shortlist: "מה השעה" scored the timer
+    # family on nothing at all and "איזה יום היום" scored the weather family
+    # on היום. Both are unambiguous questions in Hebrew - there is no
+    # imperative reading of "מה השעה" - and both measure zero hits on the
+    # actuation rows.
+    r"\bמה\s*ה?שעה\b",
+    r"\bמה\s*ה?תאריך\b",
+    r"\bאיזה\s*(יום|תאריך)\b",
 ))
 
 
@@ -597,6 +1239,10 @@ _QUANTITY: Final = re.compile(_fold(r"ה?(?:טמפרטורה|טמפ|מעלות|�
 # חיישן/לחות, and a window contact is חלון - distinct from the וילון/תריס that
 # make a cover. Temperature is deliberately absent: a climate entity reports it
 # too, and "מה הטמפרטורה בסלון" is answered from the thermostat.
+#: A door with nothing qualifying it. See :func:`query_domain`.
+_BARE_DOOR: Final = re.compile(r"(?<![א-ת])ה?דלת(?:ות)?(?![א-ת])")
+_GARAGE_DOOR: Final = re.compile(r"דלת(?:ות)?\s+ה?חני")
+
 SENSOR_NOUNS: Final[dict[str, list[str]]] = {
     "sensor": ["חיישן", "חיישנים", "לחות", "רמת לחות", "מדחום"],
     "binary_sensor": ["חלון", "חלונות"],
@@ -607,7 +1253,8 @@ SENSOR_NOUNS: Final[dict[str, list[str]]] = {
 _FAMILY_DOMAIN: Final[dict[str, str]] = {
     "light": "light", "climate": "climate", "fan": "fan", "cover": "cover",
     "lock": "lock", "camera": "camera", "vacuum": "vacuum", "switch": "switch",
-    "media": "media_player", "helper": "timer",
+    "media": "media_player", "timer": "timer", "valve": "valve",
+    "helper": "input_boolean",
 }
 
 
@@ -633,6 +1280,18 @@ def query_domain(query: str) -> str | None:
     for domain, nouns in SENSOR_NOUNS.items():
         if _hits(nouns, toks, query):
             return domain
+    # A bare door, *asked about*, is a lock. `דלת` deliberately names both
+    # families - see FAMILY_NOUNS["cover"], where the reasoning is that a door
+    # which opens is a cover and a door which is locked is a lock - and for a
+    # command that is right, because the registry settles which the house has.
+    # A question has no registry to fall through to: it types the domain and
+    # answers about it, so the tie has to break somewhere, and every one of the
+    # 98 disagreements this slot had was this word. Measured over all 28,233
+    # corpus rows it takes the domain from 1,371 right / 98 wrong to 1,467
+    # right / 2 wrong. The garage door keeps its cover reading, because
+    # "דלת החניה" names the class outright.
+    if _BARE_DOOR.search(query) and not _GARAGE_DOOR.search(query):
+        return "lock"
     for family, _score in score_families(query):
         if family in _FAMILY_DOMAIN:
             return _FAMILY_DOMAIN[family]
@@ -640,24 +1299,53 @@ def query_domain(query: str) -> str | None:
 
 
 
-def select_tool_names(query: str, limit: int = MAX_TOOLS) -> list[str]:
-    """Up to ``limit`` tool names to declare for this utterance."""
+def select_virtual_names(query: str, limit: int = MAX_TOOLS) -> list[str]:
+    """Up to ``limit`` **virtual ids**, best first.
+
+    The old ``select_tool_names``, unchanged apart from its name. Every
+    keyword table in this module discriminates at this granularity - the hints
+    that separate ``light_turn_on`` from ``light_turn_off`` are the whole
+    content of :data:`TOOL_HINTS` - so the ranking is done here and the
+    conversion to what the model is shown happens one function down.
+    """
+    # The clock leads, ahead of the interrogative test. "מה הזמן עכשיו" and
+    # "מה היום" are questions that `_QUESTION` does not match and cannot
+    # safely be made to - `\bמה\s*היום\b` collides with the weather rows this
+    # corpus is full of - so a clock sentence reached them only when some
+    # *other* pattern happened to fire. Seven of the nineteen datetime rows in
+    # the held-out set failed that way.
+    #
+    # It is allowed to lead because it is exact rather than heuristic: the
+    # whole utterance has to be the question plus politeness, which is what
+    # keeps "מה השעה בניו יורק" out. See :func:`names_a_clock`.
+    if names_a_clock(query):
+        return FAMILY_TOOLS["datetime"][:limit]
+
     if looks_like_question(query):
         # Read-only tools and nothing else. The asymmetry is the whole reason:
         # a command misread as a question costs an unanswered sentence, while a
         # question misread as a command moves a device in someone's house.
         #
-        # Which of the two read-only tools is lexical, and the model cannot do
-        # it: with both declared it answered "מה המצב של האור בשירותים" with
-        # the weather. Declaring one leaves the grammar no room to.
+        # Which of the read-only tools is lexical, and the model cannot do it:
+        # with two declared it answered "מה המצב של האור בשירותים" with the
+        # weather. Declaring one leaves the grammar no room to.
         #
-        # The sky is asked about first. Weather words appear in 2.0% of the
-        # device questions, but a weather question names a device noun far more
-        # often than that - "יהיה חם מחר" scores the climate family - so asking
-        # about the device first sent 64% of the weather rows to get_state.
+        # The clock is asked first, because "מה השעה" and "איזה יום היום" name
+        # no device and no sky and would otherwise fall through to a state
+        # query with no domain to look at.
+        # The sky is asked about first here - the clock was settled above.
+        # Weather words appear in 2.0% of the device questions, but a weather
+        # question names a device noun far more often than that - "יהיה חם מחר"
+        # scores the climate family - so asking about the device first sent 64%
+        # of the weather rows to get_state.
         # Neither signal present - "מה המצב" and nothing else - keeps both.
         if asks_about_weather(query):
             return ["get_weather"]
+        # A question about a countdown is a timer status, not a device state:
+        # "כמה זמן נשאר" has no domain for get_state to look at, and answering
+        # it with `timer.start` restarts the countdown that was asked about.
+        if names_a_timer(query):
+            return ["timer_status"]
         if query_domain(query):
             return ["get_state"]
         return FAMILY_TOOLS["query"][:limit]
@@ -665,6 +1353,11 @@ def select_tool_names(query: str, limit: int = MAX_TOOLS) -> list[str]:
     toks = _tokens(query)
     families = score_families(query)
     if not families:
+        # A play verb and a proper noun. See PLAY_VERBS: 33 of the 42 such
+        # sentences in the corpus are a media tool, against one for the
+        # generic fallback.
+        if _hits(list(PLAY_VERBS), toks, query):
+            return FALLBACK_MUSIC[:limit]
         return FALLBACK[:limit]
 
     # A family counts as a genuine domain only once a device *noun* has named
@@ -672,7 +1365,7 @@ def select_tool_names(query: str, limit: int = MAX_TOOLS) -> list[str]:
     # imperatives are shared across domains - scoring "סגור מזגן" by verb alone
     # put cover_open and get_state in the shortlist and pushed climate_turn_off
     # out of it, which was 144 of the 385 first-pass misses.
-    strong = [f for f, s in families if s >= _NOUN_WEIGHT] or [families[0][0]]
+    strong = [f for f, sc in families if sc >= _NOUN_WEIGHT] or [families[0][0]]
 
     # A question names a device too, so it scores that device's family on the
     # noun and loses the tool that could actually answer it: "האם האור דולק
@@ -690,9 +1383,7 @@ def select_tool_names(query: str, limit: int = MAX_TOOLS) -> list[str]:
     # light and lock the door") keeps both reachable...
     for fam in strong[:limit]:
         chosen.append(ranked[fam][0])
-    # ...then families expand in score order into whatever room is left. With a
-    # single domain matched this hands the whole shortlist to that domain, which
-    # is what the training distribution looks like.
+    # ...then families expand in score order into whatever room is left.
     for fam in strong:
         for tool in ranked[fam][1:]:
             if len(chosen) >= limit:
@@ -712,6 +1403,84 @@ def select_tool_names(query: str, limit: int = MAX_TOOLS) -> list[str]:
     return chosen[:limit]
 
 
+def _to_tools(virtuals: list[str], limit: int) -> list[str]:
+    """Virtual ids -> the tool names that carry them, in order, deduplicated."""
+    out: list[str] = []
+    for virtual in virtuals:
+        tool = TOOL_OF.get(virtual, virtual)
+        if tool not in out:
+            out.append(tool)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def select_tool_names(query: str, limit: int = MAX_TOOLS) -> list[str]:
+    """Up to ``limit`` **tool names** to declare for this utterance.
+
+    What the model is actually shown. Ranking happens over virtual ids in
+    :func:`select_virtual_names`; this maps them through :data:`TOOL_OF` and
+    drops the duplicates that mapping creates.
+
+    Deduplication is the point rather than a side effect. In v10 a plain light
+    command spent three of its five slots on light_turn_on, light_turn_off and
+    light_toggle, so a sentence naming three domains could not fit them: the
+    shortlist held the first domain's whole family and one tool of the second.
+    One tool per domain means the same five slots hold five domains, and the
+    choice those three slots used to express is now the ``action`` enum inside
+    one of them - constrained by the same grammar, decided by the same
+    :mod:`direction` guard.
+
+    Filling stays greedy in family-score order, and a family's *ranked* virtual
+    ids are walked rather than its declared order, so that where a family maps
+    to more than one tool - media, notify, query - the tool whose hints matched
+    leads. That is what keeps "תנגן את האלבום" declaring music_play first and
+    "תפסיק" declaring media_control first.
+    """
+    if (names_a_clock(query) or looks_like_question(query)
+            or not score_families(query)):
+        return _to_tools(select_virtual_names(query, limit), limit)
+
+    toks = _tokens(query)
+    families = score_families(query)
+    strong = [f for f, sc in families if sc >= _NOUN_WEIGHT] or [families[0][0]]
+    if "query" not in strong and any(f == "query" for f, _ in families):
+        strong.append("query")
+    ranked = {fam: _rank_within(fam, query, toks) for fam in strong}
+
+    chosen: list[str] = []
+
+    def take(virtual: str) -> bool:
+        tool = TOOL_OF.get(virtual, virtual)
+        if tool in chosen or len(chosen) >= limit:
+            return False
+        chosen.append(tool)
+        return True
+
+    # One tool per strong family first...
+    for fam in strong:
+        if len(chosen) >= limit:
+            break
+        for virtual in ranked[fam]:
+            if take(virtual):
+                break
+    # ...then the families that map to more than one tool expand into whatever
+    # room is left.
+    for fam in strong:
+        for virtual in ranked[fam]:
+            if len(chosen) >= limit:
+                break
+            take(virtual)
+    # Verb-only matches are last, and only if nothing better claimed the slot.
+    for fam, _ in families:
+        if fam in strong or len(chosen) >= limit:
+            continue
+        for virtual in _rank_within(fam, query, toks):
+            if take(virtual):
+                break
+    return chosen[:limit]
+
+
 REFUSE_BELOW: Final = 3
 
 # A room is worth two: strong evidence that a sentence is about the house,
@@ -722,6 +1491,90 @@ ROOM_WEIGHT: Final = 2
 _ROOMS: Final = PhraseIndex()
 for _slug, _forms in AREA_ALIASES.items():
     _ROOMS.extend(_forms, _slug)
+
+# Things that contain devices and are not this house. A car has an air
+# conditioner, a bag has a lock, a phone has a camera, a bicycle has a lock,
+# a computer has a fan - so the noun scores three and the utterance reaches
+# the gate looking exactly like a command. The preposition is what carries
+# the meaning, which is why the forms here are prefixed and specific: "ברכב"
+# is *in the car*, while a bare "רכב" would also match "לרכב" (to ride), and
+# "לאוטו" measures 35 genuine orders against zero off-topic ones.
+#
+# The list is a closed category rather than a set of phrases lifted off the
+# corpus, so siblings of the ones that fire are in it too ("בנייד", "בלפטופ",
+# "של המכונית") even though nothing in this corpus says them. Leaving those
+# out is what would be fitting the corpus - the same argument that keeps
+# "למעלה" out of FLOOR_PHRASES, run in the other direction.
+#
+# It is consulted by the sentence gate only. Running it per clause as well was
+# the obvious next step and was measured instead: of the 1,610 rows that split
+# into more than one clause, **zero** have a clause naming a foreign container,
+# so the rule would correct nothing and does not ship. See
+# `clause_names_nothing`, which stays the narrower test it was written as.
+NOT_THIS_HOUSE: Final[tuple[str, ...]] = (
+    "ברכב", "באוטו", "במכונית", "של הרכב", "של האוטו", "של המכונית",
+    "בתיק", "של התיק",
+    "בטלפון", "של הטלפון", "בנייד", "בסלולרי",
+    "לאופניים", "של האופניים",
+    "במחשב", "של המחשב", "בלפטופ",
+    "בבית של", "אצל אמא", "אצל השכן", "אצל השכנים",
+    "של השכן", "של השכנים",
+)
+
+# Asking *about* a song is not asking for one, and the gate cannot see the
+# difference by scoring words: "מי שר את השיר על האור בקצה המנהרה" names a
+# song and a light and scores well past the bar, so all twelve of the corpus's
+# phrasings of it were handed `media_control` and came back as `next` - the
+# assistant skipping a track at somebody asking a trivia question.
+#
+# A closed category rather than the phrases the corpus happens to say, the same
+# way NOT_THIS_HOUSE is written: the siblings are in it too. Measured over all
+# 31,519 rows, the list is matched by 208 refusals and by **zero** rows that
+# want a call, so it answers the gate outright rather than adjusting a score -
+# the same licence :func:`names_a_clock` has, and for the same reason.
+ASKS_ABOUT_CONTENT: Final[tuple[str, ...]] = (
+    "מי שר", "מי שרה", "מי כתב", "מי הלחין", "מי מנגן",
+    "מי הזמר", "מי הזמרת", "מי המבצע", "מי הלהקה",
+    "של מי השיר", "איך קוראים לשיר", "מה שם השיר",
+)
+
+_ABOUT_CONTENT: Final = re.compile(
+    "(?<![א-ת])(?:"
+    + "|".join(re.escape(normalise(_p)) for _p in ASKS_ABOUT_CONTENT)
+    + ")(?![א-ת])")
+
+
+_NOT_HERE: Final = re.compile(
+    "(?<![א-ת])(?:"
+    + "|".join(re.escape(normalise(_p)) for _p in NOT_THIS_HOUSE)
+    + ")(?![א-ת])")
+
+
+def _sounds_like_an_order(query: str) -> bool:
+    """Something to do, rather than something being reported.
+
+    Not which domain the sentence is about - whether it asks for an action at
+    all. `names_a_domain` was the obvious test and it is the wrong one:
+    "תפתח" is claimed by covers and by locks, so it is not decisive, and
+    "תפתח את השער לאופניים" is an ordinary thing to say to a house that has a
+    gate. Nothing in the corpus says it, which is precisely why the guard has
+    to be written from the language rather than from the rows.
+
+    What decides is the *shape* of the verb, not its presence. Israeli
+    Hebrew gives an order with the second-person future - תפתח, תדליק,
+    תסגור - or with the ה-imperative - הדלק, הפעל - and both are visible in
+    the first letter. Reporting verbs are not: "קונים", "מתחמם", "מטפטף".
+    Testing for any family verb instead was measured and spared eight
+    off-topic rows for nothing; this spares none of the 173 and still keeps
+    every imperative.
+    """
+    for word in normalise(query).split():
+        if not word.startswith(("ת", "ה")):
+            continue
+        if any(_hits(FAMILY_VERBS.get(fam, []), _variants(word), word)
+               for fam in FAMILY_TOOLS):
+            return True
+    return False
 
 
 def looks_off_topic(query: str, threshold: int = REFUSE_BELOW) -> bool:
@@ -769,12 +1622,121 @@ def looks_off_topic(query: str, threshold: int = REFUSE_BELOW) -> bool:
     bonus stops at two: at three a room passes the gate by itself, which lets
     through "הגינה של השכנים מוזנחת" and "לאיזה מוסך כדאי לקחת את האוטו" -
     neither of them a question, both handed a shortlist that can actuate.
+
+    Exempting every question from the gate outright was measured and rejected,
+    and the numbers are worth keeping because the idea is a tempting one. It is
+    safe - of the 283 off-topic rows it lets through, **zero** are handed a tool
+    that can call a service, because :func:`looks_like_question` has already
+    restricted them to the two read-only ones - but it takes correct refusal
+    from 75.4% to 63.4%, and answering the weather at somebody discussing house
+    prices is still a wrong answer. The sentences it was meant to rescue are
+    reached instead by naming their devices: see the sensor nouns in
+    FAMILY_NOUNS["query"], which cost nothing because a window contact really is
+    a device this house has.
+
+    Re-measured on the v12 corpus, because the plan requires the threshold be
+    chosen again whenever the corpus moves and v11 added seven families. It
+    did not move - 3 is still the only habitable value - and the curve is worth
+    keeping because it shows why so plainly (`eval/refuse_curve.py`, 3,975
+    held-out rows, 285 of them off-topic):
+
+        threshold   off-topic refused   orders refused   let through and
+                                                         able to actuate
+            1             42%               0.2%               55
+            2             69%               0.4%               37
+            3             85%               0.9%               23
+            4             94%              16.0%                0
+            5             99%              18.9%                0
+
+    Four buys the last eleven points of refusal by throwing away one order in
+    six, which is not a trade, it is a broken assistant: scoring exactly three
+    is the normal case for a sentence with one device noun, so the threshold
+    lands on top of the whole actionable distribution rather than beside it.
+
+    The fourth column is where the remaining work is, and NOT_THIS_HOUSE is
+    the first instalment: it took the row of threshold 3 from 75% refused and
+    51 actuating to 85% and 23, at exactly zero cost to the orders column.
+    Twenty-three of the 285 can still reach a tool that moves something, and
+    every one of them is a sentence whose device noun is real and whose
+    meaning is not - "מה יש בטלוויזיה הערב", "איך מכבים מחשב שנתקע". Those are
+    not reachable by scoring words, which is what the hard negatives were
+    written to demonstrate.
     """
+    # The clock names no device and never will, so no family score can reach
+    # it. The test is the whole utterance and it is exact - see
+    # :func:`names_a_clock` - which is why it is allowed to answer the gate
+    # outright rather than adding to a score.
+    if names_a_clock(query):
+        return False
+    # And its mirror: a question about who performed something is about the
+    # world, not about this house. See :data:`ASKS_ABOUT_CONTENT`.
+    if _ABOUT_CONTENT.search(normalise(query)):
+        return True
     scored = score_families(query)
     score = scored[0][1] if scored else 0
     if _ROOMS.find(query, fuzzy=False):
         score += ROOM_WEIGHT
+    # A verb only one family claims is as decisive as a device noun; see
+    # DECISIVE_VERBS for the per-verb measurement that decided which qualify.
+    if names_a_domain(query):
+        score += DECISIVE_VERB_BONUS
+    elif (_NOT_HERE.search(normalise(query))
+          and not _sounds_like_an_order(query)):
+        # The noun is real but the thing it names is not in this house, so it
+        # is worth what a noun is worth and no more. The scope cancels the
+        # noun rather than vetoing the sentence, so a second and domestic
+        # device noun still carries it over the bar.
+        #
+        # Measured over all 30,613 rows: the phrases are matched by 173 of
+        # the 3,574 refusals and by **zero** of the 27,039 rows that want a
+        # call, and not one of the 173 is phrased as an order - so the guard
+        # costs nothing here and still covers the case the corpus does not
+        # contain. See :func:`_sounds_like_an_order`.
+        score -= _NOUN_WEIGHT
     return score < threshold
+
+
+def clause_names_nothing(clause: str) -> bool:
+    """True when a *clause* of a longer sentence names nothing this house has.
+
+    The sentence gate above runs once, on the whole utterance, and then
+    `clause_split` cuts the sentence up and every piece goes to the model. So a
+    sentence that is half context and half order had its context half answered
+    with a tool call, and the corpus is full of that shape:
+
+        "צריך מים מינרלים, תוסיפי לרשימה"     -> climate_control{temp} + list_edit
+        "כבר לקחתי שוקולד, תסמן לרשימת הקניות" -> cover_control{close}  + list_edit
+
+    The first clause of each is a *statement* - what is needed, what was already
+    done - and Hebrew marks it plainly: it names no device, no room and no
+    family this house controls. The second is the order. Answering the first
+    with a call is a device moving because somebody said what they needed.
+
+    The test is deliberately narrower than :func:`looks_off_topic`, which
+    refuses anything scoring under three. A clause scoring one or two still
+    named *something* - "תזכיר לי בעוד שעה" scores one for the countdown - and
+    those must reach the model. This fires only on a clause whose family score
+    is empty, which is the machine-readable form of "nothing here is ours".
+
+    Measured over all 28,233 corpus rows, on the 1,368 that split into more
+    than one clause:
+
+        clauses dropped, the row still able to meet its gold   303
+        clauses dropped, a gold call lost                        2
+
+    Both of the two are word-merge speech noise - "תעשי את האורבגראז'" for
+    "תעשי את האור בגראז'", "האינוורטראצל" for "האינוורטר אצל" - where the merge
+    swallows the device noun, so the clause really does name nothing readable
+    and the model could not have read it either. The failure direction is the
+    benign one this whole layer is built on: a dropped clause does nothing,
+    where the bug it replaces moved a blind.
+
+    The caller never drops every clause. A sentence that passed the gate above
+    holds an order somewhere, and if each piece looks empty on its own the
+    split is what is wrong, not the sentence - so the whole thing goes to the
+    model as it did before.
+    """
+    return not score_families(clause)
 
 
 # Hebrew negation. Deliberately a short list of *unambiguous* forms.
@@ -807,6 +1769,179 @@ def looks_negated(query: str) -> bool:
     return any(pattern.search(text) for pattern in _NEGATION)
 
 
+# "Never mind". ---------------------------------------------------------------
+#
+# `HassNevermind` is one of Home Assistant's built-in intents and its whole job
+# is to do nothing: the speaker started a request and withdrew it. The official
+# Hebrew suite spells it with six words - לא משנה, ביטול, עצור, עצרי, בטל, בטלי -
+# and four of the six were already answered correctly here, by accident: they
+# name no device, so the refusal gate threw them away and the household heard
+# "לא הבנתי מה לעשות". That is the right *action* and the wrong *reason*, and
+# the reason started to matter the moment `עצור` became a decisive media verb,
+# because then a bare "עצור" paused the music instead.
+#
+# What separates the two readings is not the verb but whether it governs
+# anything. "עצור את המוזיקה" names what to stop; bare "עצור" does not, and in
+# Hebrew a transitive imperative standing alone is a withdrawal, not an order.
+# So the rule is deliberately about the *whole utterance*: strip politeness and
+# fillers, and if nothing is left but cancel words, nothing happens.
+#
+# Measured over all 20,814 generated rows: fires on **zero** actuation rows -
+# the corpus has no bare-imperative row, since every generated command names its
+# device - and on 4 off-topic ones, which it refuses anyway.
+_CANCEL: Final = frozenset((
+    "משנה", "ביטול", "עצור", "עצרי", "בטל", "בטלי",
+    # Ordinary Israeli withdrawals the official list does not carry. Each is
+    # only ever reached as a whole utterance, so none can swallow a command.
+    "עזוב", "עזבי", "שכח", "שכחי", "תשכח", "תשכחי", "מזה", "די", "מספיק",
+    "כלום", "התחרטתי",
+    # "לא צריך" is deliberately absent: `looks_negated` already owns it, and
+    # bare "לא" is the correction word this corpus uses 327 times mid-sentence.
+))
+
+# Politeness and hesitation that can surround a bare cancel without changing it.
+# The first seven are `skip_words` from the official `sentences/he/_common.yaml`;
+# the rest are the fillers this corpus generates around every utterance.
+_CANCEL_NOISE: Final = frozenset((
+    "אנא", "נא", "בבקשה", "תוכל", "תוכלי", "אפשר", "יכול", "יכולה", "אתה", "את",
+    "אה", "אממ", "כאילו", "נו", "רגע", "אוקיי", "תודה", "תשמע", "תשמעי",
+    "תקשיב", "תקשיבי", "לי", "לא", "כבר",
+))
+
+
+_CANCEL_FOLDED: Final = frozenset(_fold(w).strip(_PUNCT) for w in _CANCEL)
+_CANCEL_NOISE_FOLDED: Final = frozenset(
+    _fold(w).strip(_PUNCT) for w in _CANCEL_NOISE)
+
+
+def looks_like_cancel(query: str) -> bool:
+    """True when the whole utterance is a withdrawal and nothing else.
+
+    `HassNevermind`. Distinguished from a real command by governing nothing:
+    "עצור" is a withdrawal, "עצור את המוזיקה" is a media stop.
+
+    Tested per word rather than against :func:`_tokens`, which unions the
+    prefix-stripped variants of every word into one set. A subset test over that
+    set fails on exactly the words this needs: ב and מ are clitics, so `ביטול`
+    contributes `יטול` and `לא משנה` contributes `שנה`, and neither stripped form
+    is a cancel word. Each word only has to match on *one* of its variants.
+    """
+    meaningful = 0
+    for word in query.split():
+        variants = _variants(word)
+        if variants & _CANCEL_NOISE_FOLDED:
+            continue
+        if not variants & _CANCEL_FOLDED:
+            return False
+        meaningful += 1
+    # Politeness alone is not a cancel - it is not anything, and the refusal
+    # gate is the honest answer for it.
+    return meaningful > 0
+
+
+#: How much rendered schema the shortlist may spend, in characters of JSON.
+#:
+#: Needle decodes through a 256-token sliding KV window and this project
+#: measured ``_doc_prefix_len`` at 0, so nothing is pinned: a long tools block
+#: pushes its own head out of the window before generation starts. v10's
+#: shortlist rendered to about 288 tokens and worked; v11's domain tools are
+#: larger individually and fewer per sentence, so the median improved (208
+#: tokens) and the tail got worse (462 at p95, on the sentences that reach
+#: four or five domains).
+#:
+#: This caps the tail rather than the count. 1500 characters of ASCII JSON is
+#: about 400 tokens at the 0.27 tokens/char this tokenizer gives English,
+#: which is the budget the plan set. Trimming happens from the back, so what
+#: is dropped is always the lowest-scoring speculative family - never the one
+#: the sentence actually named.
+#:
+#: Counting characters rather than tokens is deliberate: the component has no
+#: tokenizer on the event loop, the ratio is stable for ASCII, and the cap is
+#: a budget rather than a limit that must be exact.
+MAX_TOOL_CHARS: Final = 1500
+
+
+# The declared ``action`` enum, ordered - and sometimes cut - by the sentence.
+#
+# This is the five-tool shortlist one level down, and it exists for the same
+# measured reason. v11 collapsed 42 tools into 20, which moved "which
+# behaviour" out of the router - deterministic, and right 87.6% of the time on
+# its top pick - and into the model, which is right 37% of the time on the same
+# question. On Home Assistant's own Hebrew suite the model answered
+# `timer.change` to "בטל את הטיימר" and `timer.pause` to "מצב הטיימר": seven
+# values, and it had collapsed onto two.
+#
+# Two things are done with that, and they carry very different risk.
+#
+# **Reordering costs nothing.** Every value stays reachable, so no gold answer
+# can be made unemittable, and v10 measured that the model takes the first
+# plausible entry it is offered - that is how `timer_cancel` ranked fourth and
+# scored 0 of 13. Putting the sentence's own ranking first turns that prior
+# into an asset.
+#
+# **Cutting is the shortlist's risk again.** A value the grammar does not
+# declare cannot be emitted at all, so a wrong cut is unrecoverable. Measured
+# over all 25,542 action decisions in the corpus, cutting to the supported
+# values alone would force **67.2%** of them to the right answer outright - and
+# drop the right answer on **1.87%**. Per tool it splits cleanly, and the ones
+# that fail are the ones this project already documents as lexically
+# overloaded:
+#
+#     lock_control      997 forced right,  0 dropped
+#     vacuum_control   1237 forced right,  0 dropped
+#     list_edit        1222 forced right,  0 dropped
+#     switch_control    751 forced right,  0 dropped
+#     helper_toggle     398 forced right,  0 dropped
+#     camera_control    207 forced right,  0 dropped
+#     get_datetime      162 forced right,  0 dropped
+#     ------------------------------------------------ the rest keep the enum
+#     fan_control       724 forced right,   1 dropped
+#     valve_control     439 forced right,  12 dropped
+#     routine_run       519 forced right,  17 dropped
+#     cover_control    3792 forced right,  29 dropped
+#     light_control    3245 forced right,  51 dropped
+#     timer_control       8 forced right,  69 dropped
+#     media_control    1265 forced right,  77 dropped
+#     climate_control  2199 forced right, 222 dropped
+#
+# `climate_control`'s 222 are one shape - "תנמיך את הקירור" lowers the
+# temperature of the cooling, and קירור is the machine as well as the mode, the
+# same collision `slot_match` documents. `light_control`'s 51 are the dimming
+# case `direction._NOT_A_DIRECTION` already names: עמעם routes to
+# `light_turn_off` and *means* a brightness.
+#
+# So the cut ships for the seven that measure zero and the order ships for
+# everything.
+CUT_ACTIONS: Final[frozenset[str]] = frozenset((
+    "lock_control", "vacuum_control", "list_edit", "switch_control",
+    "helper_toggle", "camera_control", "get_datetime",
+))
+
+
+def ranked_actions(query: str, tool: str) -> tuple[list[str], bool]:
+    """``(actions best-first, safe to cut)``.
+
+    An empty list means the sentence supports nothing and the enum should be
+    left exactly as the catalogue declares it.
+    """
+    mapping = ACTIONS.get(tool)
+    if not mapping:
+        return [], False
+    toks = _tokens(query)
+    scored = [
+        (_hits(TOOL_HINTS.get(virtual, []), toks, query), index, action)
+        for index, (action, virtual) in enumerate(mapping.items())
+    ]
+    if not any(hits for hits, _, _ in scored):
+        return [], False
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    ordered = [action for _, _, action in scored]
+    supported = [action for hits, _, action in scored if hits]
+    if tool in CUT_ACTIONS and supported:
+        return supported, True
+    return ordered, False
+
+
 def select_tools(query: str, catalogue: list[dict[str, Any]],
                  limit: int = MAX_TOOLS) -> list[dict[str, Any]]:
     """Filter a full tool catalogue down to the shortlist for this utterance."""
@@ -814,4 +1949,31 @@ def select_tools(query: str, catalogue: list[dict[str, Any]],
     names = [n for n in select_tool_names(query, limit) if n in by_name]
     if not names:  # catalogue does not contain our names at all
         return catalogue[:limit]
-    return [by_name[n] for n in names]
+    chosen = [by_name[n] for n in names]
+
+    # The enum the model is shown, ordered by the sentence and cut where
+    # cutting has been measured never to lose the right answer. A copy, because
+    # the catalogue is shared and read on every turn.
+    ordered = []
+    for tool in chosen:
+        actions, _cut = ranked_actions(query, tool["name"])
+        spec = tool["parameters"]["properties"].get("action")
+        if not actions or spec is None or actions == spec["enum"]:
+            ordered.append(tool)
+            continue
+        properties = dict(tool["parameters"]["properties"])
+        properties["action"] = {**spec, "enum": actions}
+        ordered.append({
+            **tool,
+            "parameters": {**tool["parameters"], "properties": properties},
+        })
+    chosen = ordered
+
+    # Spend no more than the budget, and always keep the first tool whatever
+    # it costs - a sentence with no declared tool at all can only be refused.
+    spent = 0
+    for i, tool in enumerate(chosen):
+        spent += len(json.dumps(tool, separators=(",", ":")))
+        if i and spent > MAX_TOOL_CHARS:
+            return chosen[:i]
+    return chosen

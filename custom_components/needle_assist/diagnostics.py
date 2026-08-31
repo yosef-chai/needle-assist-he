@@ -32,6 +32,7 @@ from . import direction, slot_match, tool_router
 from .clause_split import MAX_CLAUSES
 from .const import (
     BUNDLED_WEIGHTS,
+    CALL_OF,
     CONF_MUSIC_PLAYER,
     MUSIC_INTEGRATION,
 )
@@ -75,14 +76,39 @@ async def async_get_config_entry_diagnostics(
         and not item.disabled_by
     )
 
+    # The domains v11 reached for the first time, and the three of them Home
+    # Assistant exposes to Assist by *default*. A household that has a to-do
+    # list, a humidifier or a water heater sees it offered to the assistant,
+    # and until v11 got "לא מצאתי מכשיר מתאים" for it - so "do I have one, and
+    # can this see it" is the first question worth answering without a debug
+    # log. `assist_satellite` is here for the same reason one step over: an
+    # announcement with nowhere to play is a command that cannot work, and
+    # nothing else in the house explains why.
+    reachable = {
+        domain: sorted(state.entity_id
+                       for state in hass.states.async_all(domain))
+        for domain in ("todo", "humidifier", "water_heater", "valve",
+                       "button", "input_button", "assist_satellite", "timer")
+    }
+    # The legacy list integration has no entity at all, so it can only be
+    # detected by its service.
+    reachable["shopping_list"] = (
+        ["<service only>"]
+        if hass.services.has_service("shopping_list", "add_item") else [])
+
     return {
         "engine": {
             "version": fetch.ENGINE_VERSION,
             "weights": _weights_label(runner),
             "tools_declared_per_turn": tool_router.MAX_TOOLS,
             "tools_in_catalogue": len(getattr(runner, "_tools", []) or []),
+            # One tool per domain since v11, with the behaviour as an `action`
+            # enum inside it. The second count is the one a bug report should
+            # be compared against.
+            "behaviours_in_catalogue": len(CALL_OF),
         },
         "house": house,
+        "domains_v11_reached": reachable,
         # Playing something by name needs a Music Assistant player. With none
         # found, a request to play resumes playback on the room's speaker
         # instead - which is the right answer, and not the one that was asked
@@ -98,6 +124,7 @@ async def async_get_config_entry_diagnostics(
             "room_weight": tool_router.ROOM_WEIGHT,
             "max_clauses": MAX_CLAUSES,
             "families": sorted(tool_router.FAMILY_TOOLS),
+            "max_tool_chars": tool_router.MAX_TOOL_CHARS,
             # Which corrections the sentence is allowed to make to the model.
             # A household reporting "it unlocked instead of locking" wants to
             # know whether the pair was guarded at all.

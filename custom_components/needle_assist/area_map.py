@@ -96,6 +96,91 @@ for _slug in AREA_ALIASES:
     _ALIAS_INDEX.setdefault(_norm(_slug), _slug)
 
 
+# The same bridge, one level up: what Israelis call the floors of a house.
+#
+# Home Assistant has had a floor registry since 2024.4 and five built-in
+# intents take a `floor` slot. This table exists for exactly one job - reading
+# a *registry floor name* and deciding which of the five slugs the model emits
+# it answers to - and it is never matched against an utterance. That
+# distinction is the whole safety argument: "למעלה" is already in this
+# project's weather vocabulary ("חם למעלה"), so a lexicon consulted on the
+# sentence would turn a question about the heat upstairs into a command for
+# every device on a floor. Consulted on a floor's *name*, it cannot.
+#
+# The sentence route is `slot_match.areas_on_floor`, which builds its index
+# from the registry and the household's own aliases and outranks this
+# entirely. See `slot_match.areas_on_floor_slug`.
+FLOOR_ALIASES: Final[dict[str, list[str]]] = {
+    "upper": ["קומה עליונה", "הקומה העליונה", "עליונה", "למעלה", "קומה שנייה",
+              "קומה שניה", "upper", "first floor", "upstairs"],
+    "lower": ["קומה תחתונה", "הקומה התחתונה", "תחתונה", "למטה", "lower",
+              "downstairs"],
+    "ground": ["קומת קרקע", "קומת הקרקע", "קרקע", "קומת כניסה", "כניסה",
+               "ground", "ground floor"],
+    "basement": ["מרתף", "המרתף", "בייסמנט", "basement", "cellar"],
+    "roof": ["גג", "הגג", "קומת גג", "גג הבית", "roof", "rooftop"],
+}
+
+_FLOOR_INDEX: Final[dict[str, str]] = {
+    _norm(alias): slug
+    for slug, aliases in FLOOR_ALIASES.items()
+    for alias in aliases
+}
+for _slug in FLOOR_ALIASES:
+    _FLOOR_INDEX.setdefault(_norm(_slug), _slug)
+
+
+# The floors a *sentence* may name, which is a different table from the one
+# above and had to be measured rather than assumed.
+#
+# `FLOOR_ALIASES` reads a registry floor *name*; this reads an utterance, and
+# until v11 there was no such table at all - deliberately, because the corpus
+# had no floor rows to measure one against and the obvious candidates are the
+# dangerous ones. v11 added the family, so the measurement exists now. Every
+# phrase below was scored against all 30,622 corpus rows, and only the ones
+# that fire on **zero** rows carrying no floor are here:
+#
+#     מרתף          72 right, 0 elsewhere      הגג        144 right, 0 elsewhere
+#     קרקע          54 right, 0 elsewhere      קומת הגג    49 right, 0 elsewhere
+#     בייסמנט       33 right, 0 elsewhere      קומה ראשונה 17 right, 0 elsewhere
+#
+# Two are missing on purpose and they are the two anybody would reach for
+# first. `למטה` fires on **159** rows that name no floor - "תוריד את התריס
+# למטה" lowers a blind, and it would have lowered every blind in the house.
+# `למעלה` measures 43 right and zero collisions on this corpus, and stays out
+# anyway: the corpus's own weather vocabulary contains "חם למעלה", the two
+# adverbs are one word apart in Hebrew, and a table that keeps one of a
+# symmetric pair because the other happened to collide is fitting the corpus
+# rather than the language. Both are still reachable the way every unusual room
+# is - a household that adds "למעלה" as a Home Assistant floor alias gets it,
+# and has said so on purpose.
+#
+# Qualifying them was tried too, because "בקומה למטה" is not ambiguous the way
+# "למטה" is. As a pair - `קומה למטה` and `קומה למעלה` together, so each fences
+# the other - they measure 49 right, **2 wrong** and zero collisions. The two
+# are `בקומה למתה`, ordinary ט/ת speech noise, and the fuzzy pass reads it as
+# the opposite floor. Elsewhere in this project two disagreements out of fifty
+# would ship; here they would not, because what is wrong is the *target*. A
+# floor that is not resolved falls back to the room the speaker is standing in,
+# and a floor resolved to the wrong one turns off the lights upstairs.
+#
+# Consulted at tier 1, below the household's own floor names, and only for a
+# floor this installation actually has: see `slot_match.Slots._floor_index`.
+FLOOR_PHRASES: Final[dict[str, list[str]]] = {
+    "upper": ["קומה עליונה", "הקומה העליונה", "קומה שנייה", "קומה שניה"],
+    "lower": ["קומה תחתונה", "הקומה התחתונה"],
+    "ground": ["קומת קרקע", "קומת הקרקע", "קומת כניסה", "קומת הכניסה",
+               "קרקע", "קומה ראשונה", "הקומה הראשונה"],
+    "basement": ["מרתף", "בייסמנט"],
+    "roof": ["הגג", "קומת גג", "קומת הגג", "גג הבית"],
+}
+
+
+def floor_slug_for_name(name: str) -> str | None:
+    """Canonical floor slug for a Home Assistant floor name, if recognised."""
+    return _FLOOR_INDEX.get(_norm(name))
+
+
 def slug_for_name(name: str) -> str | None:
     """Canonical slug for a Home Assistant area name, if we recognise it."""
     return _ALIAS_INDEX.get(_norm(name))

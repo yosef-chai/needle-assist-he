@@ -72,7 +72,15 @@ _PREFIX_REQUIRED: Final = f"(?=[{_PREFIX_LETTERS}]){_PREFIX_CHAIN}"
 # The same chain, anchored, with the preposition captured. ב/ל/מ/כ are the
 # locative ones - "in the", "to the", "from the" - and their presence is the
 # only evidence a token is naming a *place*. The fuzzy pass leans on it.
-_CHAIN_AT_START: Final = re.compile("^(?:ו)?(?:כש|ש)?([בלכמ])?(ה)?")
+# ``כ`` is deliberately not in the group. It means "as", it is not how a
+# room is introduced in this corpus, and it is the first letter of ordinary
+# words the fuzzy pass then gets to match: ``כבויים`` - switched off - is
+# two edits from ``כיריים``, the hob, so *every* question about what is off
+# resolved to the kitchen. Measured per clause over all 31,519 corpus rows,
+# dropping it is strictly better: 33,809 areas right and 551 invented
+# becomes 33,882 right and 478 invented, with the 117 missed and the 31
+# resolved-to-the-wrong-room both unchanged. Nothing is lost.
+_CHAIN_AT_START: Final = re.compile("^(?:ו)?(?:כש|ש)?([בלמ])?(ה)?")
 
 # A match must not start or end mid-word. Latin letters are in the class too,
 # because Home Assistant entities are very often named in English even in a

@@ -49,9 +49,15 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Final
 
-from .area_map import AREA_ALIASES, slug_for_name
+from . import hebrew_numbers
+from .area_map import (
+    AREA_ALIASES,
+    FLOOR_PHRASES,
+    floor_slug_for_name,
+    slug_for_name,
+)
 from .hebrew_text import PhraseIndex, normalise
-from .tool_router import FAMILY_NOUNS, _fold, _variants
+from .tool_router import FAMILY_NOUNS, _fold, _hits, _tokens, _variants
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -171,6 +177,58 @@ def extract_message(utterance: str) -> str | None:
             return None
 
     body = _POLITE_TAIL.sub("", body).strip()
+    return body or None
+
+
+# What goes on a list, and what comes off one. -------------------------------
+#
+# `HassListAddItem`, `HassListCompleteItem`, `HassListRemoveItem` and their
+# three `shopping_list` counterparts all carry one slot, and it is free Hebrew
+# text: "חלב", "לחם מלא", "לקחת את הכלב לווטרינר". The model cannot supply it -
+# Hebrew reaches a tool argument as \uXXXX escapes, six exact characters per
+# letter, and it gets them wrong - so the sentence does, exactly as it does for
+# a notification's body.
+#
+# Written against the raw sentence rather than the normalised one for the same
+# reason `extract_message` is: the result is read back to a person and stored
+# on their list, and `normalise` folds final letters - it would store "לחמ".
+_LIST_TRIGGER: Final = re.compile(
+    r"(?:^|\s)(?:תוסיף|תוסיפי|הוסף|הוסיפי|להוסיף|תרשום|תרשמי|רשום|רשמי|"
+    r"תכתוב|תכתבי|תמחק|תמחקי|מחק|מחקי|למחוק|תסיר|הסר|להסיר|תוציא|תורידי?|"
+    r"תסמן|תסמני|סמן|סמני|לסמן|תוסף)\s+")
+
+# The list itself, wherever the sentence names it. Everything from here on is
+# the destination rather than the item.
+_LIST_TAIL: Final = re.compile(
+    r"\s*(?:[למב])?(?:ה)?(?:רשימת|רשימה|רשימ|הרשימה|קניות|הקניות|מטלות|"
+    r"המטלות|משימות|המשימות|טודו|מצרכים|סופר)\b.*$")
+
+# Politeness and pronouns that sit between the verb and the item.
+_LIST_LEAD: Final = re.compile(r"^(?:לי|לנו|בבקשה|את|עוד|אם אפשר)\s+")
+
+# "תסמן שקניתי חלב" - the item arrives inside a subordinate clause. One word
+# after the ש and the item follows.
+_LIST_CLAUSE: Final = re.compile(r"^ש\S+\s+")
+
+
+def extract_item(utterance: str) -> str | None:
+    """The list item named in the sentence, or ``None``.
+
+    ``תוסיף חלב לרשימת קניות`` -> ``חלב``. ``None`` means "the sentence did not
+    say what", which the caller must treat as a failure rather than as an empty
+    item: a shopping list with a blank entry on it is worse than a command that
+    said it did not understand.
+    """
+    text = " ".join(utterance.split())
+    trigger = _LIST_TRIGGER.search(text)
+    if not trigger:
+        return None
+    body = text[trigger.end():]
+    body = _LIST_CLAUSE.sub("", body)
+    while (trimmed := _LIST_LEAD.sub("", body)) != body:
+        body = trimmed
+    body = _LIST_TAIL.sub("", body)
+    body = _POLITE_TAIL.sub("", body).strip(" ,.!?")
     return body or None
 
 
@@ -334,6 +392,133 @@ SETTING_WORDS: Final[dict[str, dict[str, str]]] = {
         "גבוה": "high", "גבוהה": "high", "חזק": "high",
         "אוטומטי": "auto", "אוטו": "auto",
     },
+    # Which *kind* of cover. "תפתח את התריסים בסלון" and "תפתח את הווילונות
+    # בסלון" are two different commands in a room that has both, and without
+    # this they are the same one: `executor` matches every cover in the area
+    # and opens the lot.
+    #
+    # Copied verbatim from `lists/he/covers.yaml` in OHF-Voice/intents - these
+    # are the words Home Assistant's own Hebrew leaders chose for the ten
+    # `cover` device classes, and `test_the_official_cover_classes_are_carried`
+    # fails if the vendored copy and this table ever disagree.
+    #
+    # Note what is *not* here: מוסך. The official list spells garage as
+    # "דלת חניה", the door rather than the room, and that is the right call for
+    # this project too - מוסך and חניה are *areas* in `area_map`, so a garage
+    # device class carrying them would fight the room resolver for the same
+    # word. Only consulted for cover and valve calls, which is what keeps דלת
+    # and שער from colliding with the lock family that also claims them.
+    "device_class": {
+        "סוכך": "awning", "סככה": "awning",
+        "סוככים": "awning", "סככות": "awning",
+        "תריס": "blind", "תריסים": "blind",
+        # Both spellings of the curtain. Hebrew writes a consonantal vav
+        # doubled mid-word and speakers do it inconsistently; `FAMILY_NOUNS`
+        # in `tool_router` already carries all four forms for the same reason.
+        "וילון": "curtain", "וילונות": "curtain",
+        "ווילון": "curtain", "ווילונות": "curtain",
+        "דלת": "door", "דלתות": "door",
+        # The official list writes the plural as `דלתות [ה]חניה` and the
+        # singular as `דלת חניה` with no optional article. "תפתח את דלת החניה"
+        # is the commoner way to say it, so the singular gets the same
+        # definite form the plural already has.
+        "דלת חניה": "garage", "דלת החניה": "garage",
+        "דלתות חניה": "garage", "דלתות החניה": "garage",
+        "שער": "gate", "שערים": "gate",
+        "צילייה": "shade", "ציליה": "shade",
+        # The same accident as the garage above, and the same repair.
+        # Upstream writes the plural with the article and the singular
+        # without, so "תפתח את תריס ההצללה" missed every two-word key and
+        # fell through to תריס on its own - narrowing the room to a blind.
+        # A wrong kind is the one outcome this table must not produce: it
+        # finds the wrong entities rather than none.
+        "תריס הצללה": "shutter", "תריס ההצללה": "shutter",
+        "תריסי הצללה": "shutter", "תריסי ההצללה": "shutter",
+        "חלון": "window", "חלונות": "window",
+    },
+    # The air-conditioner mode. Here for the same reason colour and suction
+    # are: `hvac_mode` is one of the four Home Assistant enums whose values
+    # collide at their first byte - `heat` against `heat_cool` - and those
+    # values cannot be renamed, because HA rejects a call carrying anything
+    # else. v4 measured what a colliding prefix does to a byte-level decode:
+    # one value wins and the rest collapse. The sentence has no such problem.
+    "hvac_mode": {
+        "קירור": "cool", "קר": "cool", "מקרר": "cool",
+        "חימום": "heat", "חם": "heat", "מחמם": "heat",
+        # No "אוטו". It is the clipped form of אוטומטי and it is also the
+        # Hebrew for *car*, so "הדליקי את המיזוג ליד האוטו" - beside the car,
+        # a perfectly ordinary place for a thermostat - read as a request for
+        # automatic mode. Measured: one wrong on the corpus, which is one more
+        # than this table is allowed.
+        "אוטומטי": "auto", "אוטומט": "auto", "אוטומטית": "auto",
+        "יבש": "dry", "ייבוש": "dry", "לחות": "dry",
+        "מאוורר": "fan_only", "אוורור": "fan_only", "פן": "fan_only",
+        "כבוי": "off", "כיבוי": "off",
+    },
+    # What Music Assistant is being asked to look up. The fourth colliding
+    # enum: `album` against `artist`.
+    "media_type": {
+        "שיר": "track", "רצועה": "track", "סינגל": "track",
+        "אלבום": "album", "תקליט": "album", "דיסק": "album",
+        "זמר": "artist", "זמרת": "artist", "אמן": "artist",
+        "אמנית": "artist", "להקה": "artist", "הרכב": "artist",
+        "פלייליסט": "playlist", "רשימת השמעה": "playlist",
+        "רדיו": "radio", "תחנה": "radio", "תחנת רדיו": "radio",
+    },
+    # Which input a speaker or television is switched to.
+    "source": {
+        "ספוטיפיי": "spotify", "ספוטיפי": "spotify",
+        "יוטיוב": "youtube", "יוטוב": "youtube",
+        "רדיו": "radio",
+        "טלוויזיה": "tv", "טיוי": "tv",
+        "בלוטות": "bluetooth", "בלוטוס": "bluetooth",
+        "אייראפליי": "airplay", "אירפליי": "airplay",
+    },
+    # Which list. From Home Assistant's two: the modern `todo` domain and the
+    # legacy `shopping_list` integration.
+    #
+    # A bare "רשימה" is the shopping list. Israelis say "תוסיף לרשימה חלב"
+    # far more often than they name which list, and the gold agrees: over
+    # train and test, adding the bare forms takes this slot from 538 right to
+    # **623 right, still 0 wrong**, and 174 rows stay silent. The construct
+    # form רשימת is deliberately *not* here - it is the first half of "רשימת
+    # מטלות" as readily as of "רשימת קניות", and adding it turned one
+    # speech-noised "רשימת המשימוט" into a shopping list. Multi-word keys are
+    # read first and win outright, so "רשימת מטלות" is a todo before any of
+    # this is reached; see `setting_from`.
+    "list": {
+        "קניות": "shopping", "הקניות": "shopping", "לקניות": "shopping",
+        "מצרכים": "shopping", "סופר": "shopping",
+        "רשימת קניות": "shopping", "רשימת הקניות": "shopping",
+        "רשימה": "shopping", "מהרשימה": "shopping",
+        "מטלות": "todo", "המטלות": "todo", "משימות": "todo",
+        "המשימות": "todo", "טודו": "todo",
+        "רשימת מטלות": "todo", "רשימת משימות": "todo",
+    },
+    # The four colour temperatures `lists/he/lights.yaml` names, with the
+    # Kelvin each maps to. Values are strings here because the table is one
+    # type throughout; `setting_from` returns them as written and
+    # `_service_data` hands `color_temp_kelvin` an int - see `_KELVIN`.
+    "color_temp_k": {
+        "אור נרות": "1900", "נר": "1900", "נרות": "1900",
+        "לבן חם": "2700",
+        "לבן קר": "4000",
+        "אור יום": "6500", "אור טבעי": "6500",
+    },
+    # The state a question filters on: "אילו אורות דולקים" asks for the lights
+    # that are on, not for all of them. From `lists/he/states.yaml` and
+    # `lists/he/covers.yaml`, same provenance and same guarding test.
+    "state": {
+        "דולק": "on", "דולקים": "on", "דולקות": "on",
+        "פועלים": "on", "פועלות": "on",
+        "מופעלים": "on", "מופעלות": "on",
+        "כבוי": "off", "כבוים": "off", "כבויים": "off",
+        "כבויות": "off", "מכובים": "off", "מכובות": "off",
+        "פתוח": "open", "פתוחה": "open",
+        "פתוחים": "open", "פתוחות": "open",
+        "סגור": "closed", "סגורה": "closed",
+        "סגורים": "closed", "סגורות": "closed",
+    },
 }
 
 
@@ -346,12 +531,21 @@ SETTING_WORDS: Final[dict[str, dict[str, str]]] = {
 #: never carries a verb's prefixes. Narrowed to these, the three slots read
 #: 335 / 180 / 293 right, **0 wrong**, and invent one on **0** of the calls
 #: that name none.
-_VALUE_PREFIXES: Final = ("", "ב", "ל", "ו", "וב", "ול", "כ", "ה")
+#: ``וה`` completes the pair: "התריסים והווילונות" carries a conjunction over
+#: an article, and without it only the first of the two was found - which
+#: reads as one unambiguous value rather than as the two that settle nothing.
+_VALUE_PREFIXES: Final = ("", "ב", "ל", "ו", "וב", "ול", "כ", "ה", "וה")
 
 _SETTING_FOLDED: Final[dict[str, dict[str, str]]] = {
     slot: {normalise(word): value for word, value in table.items()}
     for slot, table in SETTING_WORDS.items()
 }
+
+
+#: Slots where "את ה<value>" names the device being changed rather than the
+#: value it is being changed to. See the note inside :func:`setting_from`.
+_OBJECT_IS_THE_DEVICE: Final = frozenset(
+    ("hvac_mode", "fan_mode", "fan_speed", "source"))
 
 
 def setting_from(utterance: str, slot: str) -> str | None:
@@ -365,16 +559,157 @@ def setting_from(utterance: str, slot: str) -> str | None:
     if not table or not utterance:
         return None
     found: set[str] = set()
-    for raw in utterance.split():
+
+    # Multi-word keys first, and they win outright. "דלת חניה" is a garage and
+    # "דלת" on its own is an ordinary door, so scoring both would find two
+    # values and settle nothing - which is how the more specific reading gets
+    # lost. Same rule the area resolver uses for overlapping room names: the
+    # most specific match wins rather than competing.
+    #
+    # Substring rather than token matching, because a multi-word key spans a
+    # space that speech-to-text is free to move. The single-word tables have no
+    # keys with spaces, so this branch cannot fire for colour or fan speed and
+    # their measured "0 wrong" is untouched.
+    phrase = normalise(utterance)
+    for key, phrase_value in table.items():
+        if " " in key and key in phrase:
+            found.add(phrase_value)
+    if len(found) == 1:
+        return found.pop()
+    if found:
+        return None
+
+    words = utterance.split()
+    for position, raw in enumerate(words):
         word = normalise(raw)   # normalise already drops punctuation
+        previous = normalise(words[position - 1]) if position else ""
         for prefix in _VALUE_PREFIXES:
             folded = normalise(prefix)
             if folded and not word.startswith(folded):
                 continue
             value = table.get(word[len(folded):])
-            if value is not None:
-                found.add(value)
+            if value is None:
+                continue
+            # The object of the accusative is what is being *changed*, not what
+            # it is being changed to. "את הקירור במטבחון רק מאוורר" switches
+            # the cooling to fan-only, and reading the first value gets it
+            # exactly backwards - which is what it did: four of the corpus's
+            # hvac rows, three of them with the target word corrupted by
+            # injected speech noise so that only the object was legible.
+            #
+            # Only the bare and definite forms are skipped. A value carrying a
+            # real preposition is a target wherever it stands - "תעביר את
+            # המזגן לקירור" - and dropping those would cost every correct
+            # reading this table has.
+            #
+            # And only for the slots where the accusative object is the
+            # *device*. For `media_type` it is the content - "תנגן את האלבום
+            # שבלול" plays the album - so the same rule applied there threw
+            # away 487 correct readings. That is the whole reason it is a set
+            # rather than a rule: the grammar is identical and the semantics
+            # are opposite.
+            #
+            # Measured over all 31,519 rows, on every slot this function
+            # serves: hvac_mode goes from 413 right and 4 wrong to **451 right
+            # and 0 wrong**, and colour, colour temperature, fan mode, fan
+            # speed, media type, source and list are all unchanged at 0 wrong.
+            if (slot in _OBJECT_IS_THE_DEVICE and previous == "את"
+                    and folded in ("", normalise("ה"))):
+                break
+            found.add(value)
     return found.pop() if len(found) == 1 else None
+
+
+#: The words that turn a two-state slot *off*, per slot. Read only once the
+#: behaviour is settled - "תוריד" is a volume almost everywhere and an unmute
+#: only on a `media_mute` call - which is what keeps these lists short enough
+#: to be right.
+#:
+#: Derived from gold rather than guessed: over all 31,519 corpus rows, the
+#: words below appear on every `false` row of their slot and on no `true` one.
+#: Measured as a rule, per clause: `oscillating` 209 agree and **0 disagree**,
+#: `is_volume_muted` 221 agree and **0 disagree**.
+_SWITCHED_OFF: Final[dict[str, tuple[str, ...]]] = {
+    # "בלי סיבוב" is still a request to oscillate, so the negation lands here
+    # rather than on the behaviour. See `direction.settle_named`.
+    "oscillating": ("בלי", "ללא", "בלא", "בטל", "תבטל", "שתבטל", "לבטל",
+                    "שיפסיק", "תפסיק", "הפסק", "להפסיק"),
+    # An unmute is said as *undoing* one - cancel the muting, take the mute
+    # off, bring the sound back - and never with a negative particle, which is
+    # why the generic list above would miss two thirds of them.
+    "is_volume_muted": ("בלי", "ללא", "בלא", "בטל", "תבטל", "שתבטל", "לבטל",
+                        "השתקה", "הקול", "תוריד", "להוריד", "שתוריד",
+                        "תחזיר", "שתחזיר", "להחזיר", "החזר"),
+}
+
+
+def switch_from(utterance: str, slot: str) -> bool:
+    """Which way a two-state slot points, for a behaviour already settled.
+
+    ``True`` unless the clause says otherwise, because that is what the corpus
+    says: a request to oscillate that does not say "בלי" wants oscillation.
+    The caller has already decided the behaviour, so this only answers which
+    way - see :data:`_SWITCHED_OFF`.
+    """
+    words = _SWITCHED_OFF.get(slot)
+    if not words or not utterance:
+        return True
+    return not _hits(list(words), _tokens(utterance), utterance)
+
+
+#: The fan, as a *part* of the air conditioner rather than one of its modes.
+#: "מהירות המאוורר", "הפן של המזגן" - a clause built around one of these is
+#: asking about the fan, and its ``אוטומטי`` is the fan's automatic and not the
+#: machine's. ``מהירות`` is matched as a substring because Hebrew glues the
+#: preposition on ("למהירות") and the device nouns as whole words, because two
+#: of them are short enough to appear inside unrelated ones.
+_FAN_SPEED_NOUN: Final = normalise("מהירות")
+_FAN_DEVICE_NOUNS: Final = frozenset(
+    normalise(w) for w in ("פן", "הפן", "מאוורר", "המאוורר",
+                           "וונטה", "הוונטה", "ונטה", "הונטה"))
+#: ...except right after רק, where the bare noun is the *mode*: "לרק מאוורר"
+#: is fan-only. The same exemption :func:`hvac_target` makes, and the
+#: preposition is glued on here too.
+_ONLY_FORMS: Final = tuple(normalise(w) for w in ("רק", "ורק", "לרק", "ברק"))
+
+
+def _names_the_fan(utterance: str) -> bool:
+    """True when the clause is built around the fan as a device."""
+    folded = normalise(utterance)
+    if _FAN_SPEED_NOUN in folded:
+        return True
+    words = folded.split()
+    return any(
+        word in _FAN_DEVICE_NOUNS
+        and not (position and any(
+            words[position - 1].endswith(only)
+            and len(words[position - 1]) - len(only) <= 1
+            for only in _ONLY_FORMS))
+        for position, word in enumerate(words))
+
+
+def mode_slot(utterance: str) -> str | None:
+    """Which of the two climate mode slots the clause names, or ``None``.
+
+    `direction.settle_climate` needs the slot and not just a yes: a
+    `climate_set_temperature` with no temperature in it is a mode call, and
+    which mode decides which behaviour it becomes. Three callers computed the
+    yes as ``any(setting_from(text, s) for s in ...)`` and this replaces all
+    three, so the reading lives in one place.
+
+    The two tables overlap - ``אוטומטי`` is a machine mode and a fan speed
+    both - so the device the clause is built around decides, and only then the
+    value. Measured as the promotion rule it feeds, per clause over all 31,519
+    corpus rows, against gold, with a temperature or a switching verb in the
+    clause disqualifying it: **982 agree, 0 disagree**.
+    """
+    if not utterance:
+        return None
+    if _names_the_fan(utterance):
+        return "fan_mode" if setting_from(utterance, "fan_mode") else None
+    if setting_from(utterance, "hvac_mode"):
+        return "hvac_mode"
+    return "fan_mode" if setting_from(utterance, "fan_mode") else None
 
 
 #: A number after the title is a level, not part of the name: "שים את השיר על
@@ -384,9 +719,289 @@ _LEVEL: Final = re.compile(
     r"(\d|אחוז|עשרים|שלושים|ארבעים|חמישים|שישים|שבעים|שמונים|תשעים|מאה)")
 
 
+#: Questions that ask *which* things are in a state, rather than *whether* one
+#: is. See :func:`state_filter`.
+_WHICH_ARE: Final = re.compile(
+    r"\b(אילו|איזה|איזו|כמה"
+    r"|מה\s+פתוח|מה\s+סגור|מה\s+דולק|מה\s+כבוי|מה\s+פועל)\b"
+    r"|\bהאם\s+כל\b")
+
+
+def state_filter(utterance: str) -> str | None:
+    """The state a question wants its answer *filtered* to, or ``None``.
+
+    "אילו אורות דולקים" asks for the lights that are on, not for all of them,
+    and answering "3 פעילים, 2 כבויים" is true and is not what was asked. But
+    "תבדוק אם האור בגן דולק" names the same word and wants yes or no, and
+    filtering that one to the lit lights answers a question nobody asked.
+
+    Hebrew marks the difference and it is not the interrogative particle: both
+    "אילו" and "האם כל" take the filter, while "האם" alone and "תבדוק אם" do
+    not. Measured over all 28,233 corpus rows, on every row whose gold call can
+    carry the slot:
+
+        the sentence agrees with gold      420
+        the sentence disagrees               0
+        the sentence stays silent          132
+
+    The 132 are rows the pattern does not reach, and they answer exactly as
+    they did before this existed. Reading the state word without the
+    interrogative test was measured too: 544 right and **127 wrong**, every one
+    of them a yes/no question turned into a list.
+    """
+    if not utterance or not _WHICH_ARE.search(utterance):
+        return None
+    return setting_from(utterance, "state")
+
+
 def names_a_level(utterance: str) -> bool:
     """True when the sentence names a number, which a title does not."""
     return bool(_LEVEL.search(utterance))
+
+
+#: Units that belong to some other argument. A number wearing one of these is
+#: a percentage or a duration and never a thermostat setting.
+_NOT_DEGREES: Final = (
+    r"(?![0-9])(?!\s*(?:אחוז|אחוזים|%|דקות|דקה|שניות|שניה|שעות|שעה))")
+
+#: A target temperature: bound by `על` or `ל`, or wearing מעלות outright.
+#: The conjunction is part of the preposition in Hebrew - "ועל 24" - and
+#: it is matched so that a clause naming two of them is read as naming
+#: none rather than as naming the first.
+_TARGET_TEMP: Final = re.compile(
+    r"(?:(?<=\s)|^)ו?(?:על|ל)[- ]?(\d{1,2})" + _NOT_DEGREES
+    + r"|(?:(?<=\s)|^)(\d{1,2})\s*מעלות")
+
+#: `ב` is the preposition Hebrew uses for a *step* - "תוריד ב2 מעלות" - which
+#: is a different argument reaching a different service. It is not a target and
+#: it must not be read as one.
+_STEP_TEMP: Final = re.compile(r"(?:(?<=\s)|^)ו?ב[- ]?\d{1,2}\s*מעלות")
+
+
+def temperature_from(utterance: str) -> int | None:
+    """The target temperature the sentence names, or ``None``.
+
+    Three of the four sentences Home Assistant's own Hebrew suite still gets
+    wrong are one shape - "שנה את הטמפרטורה ל20 מעלות" - and what goes wrong is
+    not the routing. The model answers `climate_control{off}` **with no
+    argument at all**, so `direction.settle_climate`, which turns a climate
+    call carrying a temperature into a call to set one, has nothing to fire on
+    and an air conditioner switches off when somebody asked for twenty degrees.
+
+    This is the sentence supplying what the model dropped, and it is read only
+    for a climate behaviour, so a bare number bound by a preposition is a
+    thermostat setting and nothing else. Measured per clause over all 30,613
+    corpus rows, on every clause whose gold call can carry the slot:
+
+        the sentence agrees with gold      442
+        the sentence disagrees               0
+        the sentence stays silent          970
+
+    It fires on **none** of the 463 rows whose gold is a `temperature_step`,
+    and on **none** of the 2,513 climate rows that want no number at all. In
+    the whole corpus it matches exactly one clause outside a climate row.
+
+    The 970 silent ones were mostly the half of the corpus that writes the
+    number in words - "על עשרים ואחת" - which needed a Hebrew number parser
+    with the gendered forms. :mod:`hebrew_numbers` is that parser, and it is
+    the second half of this function now: over the training corpus the two
+    together read **485 right against 2 wrong**, and both of the two are
+    "אשרים" - speech noise for עשרים, in a sentence the model cannot read
+    either.
+    """
+    if not utterance or _STEP_TEMP.search(utterance):
+        return None
+    found = {int(group) for match in _TARGET_TEMP.findall(utterance)
+             for group in match if group}
+    if len(found) != 1:
+        # Not a digit anywhere the prepositions bind. Try the words.
+        return hebrew_numbers.degrees_in(utterance)
+    value = found.pop()
+    # Home Assistant's own `climate` selector is wider than this, but a
+    # thermostat asked for 3 or for 90 is a misread number rather than an
+    # instruction, and the corpus has no row outside it.
+    return value if 5 <= value <= 35 else None
+
+
+#: Words that describe a room rather than name a mode. "בחדר **חם** מדי" is
+#: too hot in here, not a request for the heater.
+_MODE_IS_A_STATE: Final = frozenset(
+    normalise(w) for w in ("חם", "קר", "יבש", "לחות"))
+
+#: `מאוורר` is an hvac mode and also the noun in "מהירות **המאוורר**", which
+#: is a fan mode. The following word decides and this is the one that must not.
+_SPEED_NOUN: Final = normalise("מהירות")
+
+#: A bare mode noun counts when this stands in front of it: "רק מאוורר".
+_ONLY: Final = frozenset(normalise(w) for w in ("רק", "ורק"))
+
+#: Prepositions that make the mode a target rather than a description.
+_MODE_PREFIXES: Final = ("ל", "ב", "על", "ול", "לב")
+
+
+#: Slots the sentence owns **in both directions**: it fills them, and its
+#: silence empties them.
+#:
+#: Every rule in this module until now could only add. The model was free to
+#: invent, and it does: 459 arguments in one release run that the utterance
+#: never evidenced - `climate_control{run, hvac_mode: heat}` for "תדליק את
+#: המזגן", `light_control{on, brightness_pct: 20}` for "תדליק את האור",
+#: `media_control{pause, source: radio}` for a sentence about nothing of the
+#: kind. Needle's own contract forbids these and the base model violates it
+#: too, which is why `over_fill` has been a reported metric since v1. Nothing
+#: acted on it.
+#:
+#: A slot is here only if the sentence was measured to be *complete* about it,
+#: not merely right - counting, over train and test, the rows whose gold
+#: carries the slot and whose sentence says nothing this module can read:
+#:
+#:     temperature 2 | brightness_pct 5 | volume_pct 2 | percentage 2
+#:     color_name 4 | fan_speed 1 | fan_mode 5 | source 4 | device_class 9
+#:
+#: Thirty-four rows out of roughly four thousand that carry one of these, and
+#: every single one is a value speech noise corrupted - אשרים for עשרים, כלש
+#: for חלש, "אוטומטיבבקשה" glued, "בערך60" glued. The sentence is not merely
+#: usually right about these; it is right whenever it is legible.
+#:
+#: **Four slots are deliberately absent**, and each says something:
+#:
+#: * `position` would break 14 - "תסגור את התריס **לגמרי**", all the way,
+#:   which is a position without being a number and whose direction is the
+#:   verb's business. See `hebrew_numbers._PCT_IDIOM`.
+#: * `media_type` would break 51: the title carries the kind - "רשימת
+#:   ההשמעה מוזיקה לעבודה" - and `extract_music` reads that, not this table.
+#: * `hvac_mode` would break **240**, because the corpus gives a mode to a
+#:   bare "תדליק את המזגן" and no sentence names one. That is a default, not a
+#:   reading, and it belongs to the model.
+#: * `temperature_step` and its siblings are idioms - "קצת", "שמץ" - with no
+#:   number in them at all, so silence there means nothing.
+SENTENCE_OWNS: Final[frozenset[str]] = frozenset((
+    "temperature", "brightness_pct", "volume_pct", "percentage",
+    "color_name", "fan_speed", "fan_mode", "source", "device_class"))
+
+
+def unsupported(utterance: str, slot: str) -> bool:
+    """True when ``slot`` is one the sentence owns and the sentence is silent.
+
+    The caller drops the argument. Anything outside :data:`SENTENCE_OWNS` is
+    never unsupported, however quiet the sentence - silence has to have been
+    measured to mean something before it may be acted on.
+    """
+    if slot not in SENTENCE_OWNS or not utterance:
+        return False
+    if slot in SETTING_WORDS:
+        return setting_from(utterance, slot) is None
+    if slot == "temperature":
+        return (temperature_from(utterance) is None
+                and not hebrew_numbers.numbers_in(utterance))
+    return (percent_from(utterance) is None
+            and not hebrew_numbers.numbers_in(utterance))
+
+
+#: The compound cover nouns, which are safe where their bare halves are not.
+_COMPOUND_COVER: Final = tuple(
+    normalise(key) for key in SETTING_WORDS["device_class"] if " " in key)
+
+
+def names_a_compound_cover(utterance: str) -> bool:
+    """True when the sentence names a cover by a phrase only a cover has.
+
+    "דלת החניה" is the garage door and "דלת" alone is what a lock has; "תריס
+    ההצללה" is an awning. All 147 corpus rows naming one of these eight
+    phrases are cover rows. See `direction.NAMES_A_COVER`.
+    """
+    if not utterance:
+        return False
+    phrase = normalise(utterance)
+    return any(key in phrase for key in _COMPOUND_COVER)
+
+
+def hvac_target(utterance: str) -> str | None:
+    """The hvac mode the sentence asks the machine to be *put into*, or None.
+
+    Distinct from ``setting_from(utterance, "hvac_mode")``, which reads the
+    slot for a call that is already known to set a mode. This answers the
+    harder question - *is this sentence a request to change the mode at all* -
+    and it has to be stricter, because the mode words double as adjectives and
+    as device nouns: "בחדר חם מדי" wants a colder number and "מהירות המאוורר"
+    wants a fan speed, and both read as a mode to the loose test.
+
+    So: bound by a preposition, or bare only after רק; never an adjective;
+    never the noun in "מהירות המאוורר"; and exactly one, since two settle
+    nothing.
+
+    It exists because of a hole in the pipeline rather than in a lexicon. The
+    setting slots are read for the behaviour the model chose - `SETTING_SLOT`
+    is keyed on the virtual id - so when the model answers "תעביר את המזגן
+    לאוורור" with `climate_control{temp}`, nothing ever reads the mode: the
+    behaviour that carries the slot was never selected. Thirty of the four
+    hundred failures in one dump were exactly that, all of them fan_only.
+
+    Measured over the training corpus on single-clause single-call climate
+    rows, with a fan mode or a target temperature in the sentence
+    disqualifying it: **119 agree, 0 disagree**.
+    """
+    if not utterance:
+        return None
+    table = _SETTING_FOLDED.get("hvac_mode") or {}
+    words = normalise(utterance).split()
+    found: set[str] = set()
+    for position, word in enumerate(words):
+        previous = words[position - 1] if position else ""
+        if previous.startswith(_SPEED_NOUN):
+            continue
+        for prefix in (*_MODE_PREFIXES, ""):
+            if prefix and (not word.startswith(prefix)
+                           or len(word) <= len(prefix)):
+                continue
+            stem = word[len(prefix):]
+            value = table.get(stem)
+            if value is None:
+                continue
+            if stem in _MODE_IS_A_STATE:
+                break
+            if not prefix and previous not in _ONLY:
+                break
+            found.add(value)
+            break
+    return found.pop() if len(found) == 1 else None
+
+
+def percent_from(utterance: str) -> int | None:
+    """The percentage the sentence names, or ``None``.
+
+    One function for four slots - `brightness_pct`, `volume_pct`, `position`
+    and `percentage` - because Hebrew says all four the same way and only the
+    behaviour decides which of them it is. `const.NUMBER_SLOT` is that
+    decision; this is the reading.
+
+    Digits and words alike, and the fraction idioms an Israeli reaches for
+    instead of either: "חצי", "רבע", "מקסימום". Measured over the training
+    corpus on single-clause single-call rows whose gold carries one of the
+    four: **1,175 right, 3 wrong**, all three a value speech noise corrupted.
+
+    It fires on **none** of the 779 rows whose gold is a relative step - the
+    corpus says those as "קצת" and "הרבה יותר" and never as a percentage - so
+    unlike :func:`temperature_from` this one needs no step guard.
+    """
+    return hebrew_numbers.percent_in(utterance)
+
+
+def duration_from(utterance: str) -> dict[str, int]:
+    """The countdown the sentence names, as ``{hours, minutes, seconds}``.
+
+    Empty when it names none. Measured over the training corpus on timer
+    rows: **553 exactly right, 66 the same countdown spelled with different
+    units, 7 wrong, 5 silent** - and it speaks on none of the timer rows whose
+    gold carries no duration at all, which is what keeps a pause or a cancel
+    from acquiring one.
+
+    The 66 are the corpus disagreeing with itself: "טיימר של שעתיים" is
+    `{hours: 2}` in one row and `{minutes: 120}` in the next. Both are the
+    same two hours to `executor._seconds`, and `data/generate.py` now spells
+    them one way. See :func:`hebrew_numbers.duration_in`.
+    """
+    return hebrew_numbers.duration_in(utterance)
 
 
 def extract_music(utterance: str) -> MusicRequest | None:
@@ -567,6 +1182,25 @@ def _forms_for_area(name: str, aliases: Iterable[str],
     return own, {f for f in synonyms if f and f.strip()} - own
 
 
+def _outside(matches: list[Any], wider: list[Any]) -> list[Any]:
+    """``matches`` with anything strictly inside a ``wider`` span removed.
+
+    One rule, used twice, because the same ambiguity turns up at two levels: a
+    device whose name sits inside a room's ("המחשב" in "חדר המחשב") is the room,
+    and a room whose name sits inside a floor's ("כניסה" in "קומת הכניסה") is
+    the floor. In both, the longer phrase is the one the speaker actually said
+    and the shorter is a substring of it, so containment settles it with
+    nothing to tune. Equal spans are left alone - that is the same phrase, not
+    a narrower reading of it.
+    """
+    if not matches or not wider:
+        return matches
+    return [m for m in matches
+            if not any(w.start <= m.start and m.end <= w.end
+                       and (w.end - w.start) > (m.end - m.start)
+                       for w in wider)]
+
+
 def build_area_index(areas: Iterable[tuple[str, str, Iterable[str]]]) -> PhraseIndex:
     """Phrase index over ``(area_id, name, aliases)`` triples.
 
@@ -624,11 +1258,13 @@ class SlotIndex:
     def __init__(self, hass: Any) -> None:
         self.hass = hass
         self._areas: PhraseIndex | None = None
+        self._floors: PhraseIndex | None = None
         self._by_domain: dict[str, PhraseIndex] = {}
         self._counts: dict[str, int] = {}
 
     def invalidate(self, _event: Any = None) -> None:
         self._areas = None
+        self._floors = None
         self._by_domain.clear()
         self._counts.clear()
 
@@ -649,6 +1285,124 @@ class SlotIndex:
     def areas(self, utterance: str) -> list[str]:
         """Every area named in the sentence, in the order it was said."""
         return [m.value for m in self._area_index().find_all(utterance)]
+
+    # -- floors -------------------------------------------------------------
+    def _floor_index(self) -> PhraseIndex:
+        """Phrases for the floors this installation has.
+
+        The floor registry first, at tier 0: a household that named a floor
+        "קומה עליונה" is matched on "בקומה העליונה" by the same prefix chain
+        that finds a room, and Home Assistant's per-floor aliases extend it
+        with no code change - the same answer `area_map` reaches for rooms
+        nobody anticipated.
+
+        Then `area_map.FLOOR_PHRASES`, at tier 1, for the floors this house
+        actually has. Until v11 there was no such table, because the corpus had
+        no floor rows to measure one against; the family exists now and every
+        phrase in it fires on zero rows that name no floor. It is tier 1 so the
+        household's own name always wins, and it is keyed on the *slug* the
+        registry name resolves to, so it can only ever reach a floor this
+        installation already has. Measured on the held-out set, it takes the
+        floor rows the sentence reaches from 46 of 76 to **63 of 76**, with
+        zero contradicted. The remaining 13 all say "למטה", which is excluded
+        on purpose: see `area_map.FLOOR_PHRASES`.
+        """
+        if self._floors is not None:
+            return self._floors
+        from homeassistant.helpers import floor_registry as fr  # noqa: PLC0415
+
+        index = PhraseIndex()
+        for floor in fr.async_get(self.hass).async_list_floors():
+            for form in {floor.name, *(floor.aliases or ())}:
+                if form:
+                    index.add(form, floor.floor_id)
+            # And the measured Hebrew, for the floor this one answers to.
+            slug = floor_slug_for_name(floor.name) or floor.floor_id
+            for phrase in FLOOR_PHRASES.get(slug, ()):
+                index.add(phrase, floor.floor_id, tier=1)
+        _LOGGER.debug("floor index: %d phrases", len(index))
+        self._floors = index
+        return index
+
+    def areas_on_floor(self, utterance: str) -> list[str]:
+        """Every area on a floor the sentence names, or an empty list.
+
+        A floor is a set of rooms, so "תכבה הכל בקומה העליונה" resolves to the
+        areas on it and the rest of the executor proceeds exactly as it would
+        for a sentence that had named them all. Nothing downstream has to learn
+        what a floor is.
+
+        Only consulted when no room matched: a sentence naming both a room and
+        its floor means the room, which is the more specific of the two.
+        """
+        found = self._floor_index().find_all(utterance)
+        if not found:
+            return []
+        # The most specific floor, on the same rule overlapping rooms use.
+        floor_id = max(found, key=lambda m: m.rank).value
+        from homeassistant.helpers import area_registry as ar  # noqa: PLC0415
+
+        return [area.id for area in ar.async_get(self.hass).async_list_areas()
+                if area.floor_id == floor_id]
+
+    def areas_on_floor_slug(self, slug: str | None) -> list[str]:
+        """Every area on the floor the *model* named, or an empty list.
+
+        The same standing the model's ``area`` slug has, and consulted for the
+        same reason: the sentence is right far more often, so
+        :meth:`areas_on_floor` runs first and this is what is left - the
+        household whose floor is called something the phrase index cannot
+        reach from the words that were said.
+
+        Matched against the floor registry by id, by name and by the same
+        slug rule `area_map` uses for rooms, so "upper" reaches a floor named
+        "Upper" or "קומה עליונה" with an alias.
+        """
+        if not slug or not isinstance(slug, str):
+            return []
+        from homeassistant.helpers import area_registry as ar  # noqa: PLC0415
+        from homeassistant.helpers import floor_registry as fr  # noqa: PLC0415
+
+        want = slug.strip().lower().replace(" ", "_")
+        floor_id = None
+        for floor in fr.async_get(self.hass).async_list_floors():
+            names = {floor.floor_id, floor_slug_for_name(floor.name)}
+            names |= {floor_slug_for_name(a) for a in (floor.aliases or ())}
+            if want in names:
+                floor_id = floor.floor_id
+                break
+        if floor_id is None:
+            return []
+        return [area.id for area in ar.async_get(self.hass).async_list_areas()
+                if area.floor_id == floor_id]
+
+    def list_entities(self, utterance: str, kind: str | None = None) -> list[str]:
+        """The `todo` entities a list command should act on.
+
+        A household can have several lists, and adding milk to all of them is
+        not a reading of "תוסיף חלב לרשימת קניות". So: a list named outright
+        in the sentence wins; failing that, the single list this house has;
+        failing that, the one whose name matches the *kind* the sentence
+        implied - a shopping list rather than a chore list.
+
+        Empty when nothing matched, which sends the caller to the legacy
+        `shopping_list` integration if this installation has one.
+        """
+        named = [m.value for m in self._entity_index("todo").find_all(utterance)]
+        if named:
+            return named
+        states = self.hass.states.async_all("todo")
+        if len(states) == 1:
+            return [states[0].entity_id]
+        if kind:
+            words = SETTING_WORDS["list"]
+            wanted = [state.entity_id for state in states
+                      if any(kind == value and normalise(word) in
+                             normalise(state.attributes.get("friendly_name", ""))
+                             for word, value in words.items())]
+            if wanted:
+                return wanted
+        return []
 
     def area_for_call(self, utterance: str, index: int = 0,
                       total: int = 1) -> str | None:
@@ -677,8 +1431,17 @@ class SlotIndex:
         prevent. Overlapping matches are therefore competing answers to one
         question and the most specific wins; only rooms named in spans that do
         not touch are two rooms.
+
+        The same rule reaches one level up. "תכבה את האורות בקומת הכניסה" names
+        a *floor*, and `כניסה` is one of this project's words for the hallway,
+        so the room index claimed it and `_target_area` never got as far as
+        asking about floors - the entrance floor lit one corridor. The floor
+        phrase contains the room phrase outright, so the spans settle that too.
+        16 rows over the corpus, every one of them a floor read as a room, and
+        none the other way.
         """
-        found = self._area_index().find_occurrences(utterance)
+        found = _outside(self._area_index().find_occurrences(utterance),
+                         self._floor_index().find_occurrences(utterance))
         if not found:
             return []
         if len(found) == total and 0 <= index < total:
@@ -742,8 +1505,22 @@ class SlotIndex:
 
         Empty for the ordinary case - "turn on the light in the kitchen" names
         no device - which is what lets the caller fall back to the room.
+
+        A device whose name sits *inside* a room's is the room. "תכבה את המפסק
+        בחדר המחשב" is the switch in the computer room, and a house with a
+        switch called "המחשב" was turning off the computer instead, because the
+        executor consults this before it consults the areas at all. The room
+        phrase is the longer of the two and contains the device phrase outright,
+        so the spans settle it with nothing to tune: 8 rows over the corpus, and
+        every one of them a wrong device rather than a wrong room - which is the
+        same failure class, one register down.
+
+        "תכבה את המחשב בסלון" is untouched: the device is at 8-13 and the room
+        at 14-19, so neither contains the other and both are read.
         """
-        return [m.value for m in self._entity_index(domain).find_all(utterance)]
+        return [m.value for m in _outside(
+            self._entity_index(domain).find_all(utterance),
+            self._area_index().find_occurrences(utterance))]
 
 
     # -- introspection ------------------------------------------------------
