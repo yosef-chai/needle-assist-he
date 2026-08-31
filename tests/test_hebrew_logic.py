@@ -30,8 +30,21 @@ ROUTER = load("tool_router")
 CLAUSE = load("clause_split")
 REPLY = load("reply")
 DIRECTION = load("direction")
-EXEC = load("executor")
 NUM = load("hebrew_numbers")
+
+# `executor` is the one module here that imports Home Assistant, and one CI
+# job runs this file with nothing installed at all - that job exists precisely
+# to prove the Hebrew logic can be checked without a running HA. A plain
+# module-level load therefore fails at *collection*, before any test-level
+# skip can run, and takes all 330 tests with it. So the import is allowed to
+# fail and the handful of tests that reach into the executor skip instead.
+try:
+    EXEC = load("executor")
+except ModuleNotFoundError:  # pragma: no cover - only in the bare CI job
+    EXEC = None
+
+needs_executor = pytest.mark.skipif(
+    EXEC is None, reason="reaches into executor, which imports homeassistant")
 
 
 # --- tool / service coverage ------------------------------------------------
@@ -46,6 +59,10 @@ def test_every_service_in_the_map_exists():
     names came from: `valve` spells open as `open_valve`, `todo` completes an
     item with `update_item`, and there is no `timer.resume` at all.
     """
+    # Home Assistant is not installed in the bare CI job, and this test
+    # reaches it. Skipping beats failing: the job exists to prove the
+    # *Hebrew* logic needs nothing installed, not to check this.
+    pytest.importorskip("homeassistant")
     import homeassistant.components as components
     import yaml
 
@@ -209,6 +226,10 @@ def test_manifest_declares_no_requirements():
 
 def test_engine_cache_lives_under_the_config_directory():
     """`~/.cache` does not survive a Home Assistant core update; /config does."""
+    # Home Assistant is not installed in the bare CI job, and this test
+    # reaches it. Skipping beats failing: the job exists to prove the
+    # *Hebrew* logic needs nothing installed, not to check this.
+    pytest.importorskip("homeassistant")
     import importlib.util
     import types
 
@@ -1770,6 +1791,7 @@ def test_multi_word_keys_do_not_disturb_the_measured_slots():
     ("אילו חלונות פתוחים", [], 3, "אף אחד"),
     ("האם החלונות סגורים", [], 3, "לא"),
 ])
+@needs_executor
 def test_a_state_question_is_answered_in_the_shape_it_was_asked(
         utterance, named, total, expected):
     assert EXEC.CallExecutor._say_which(utterance, named, total) == expected
@@ -1782,6 +1804,10 @@ def test_device_class_narrowing_is_only_for_domains_that_need_it():
     defines for `cover`, or the narrowed match silently finds nothing and the
     fallback quietly does all the work.
     """
+    # Home Assistant is not installed in the bare CI job, and this test
+    # reaches it. Skipping beats failing: the job exists to prove the
+    # *Hebrew* logic needs nothing installed, not to check this.
+    pytest.importorskip("homeassistant")
     assert CONST.DEVICE_CLASS_DOMAINS == frozenset(("cover",))
     from homeassistant.components.cover import CoverDeviceClass
     real = {c.value for c in CoverDeviceClass}
@@ -1797,6 +1823,10 @@ def test_every_fallback_service_exists():
     Checked against the components' own `services.yaml`, which is where the
     names came from: `valve` spells open as `open_valve`, not `open_cover`.
     """
+    # Home Assistant is not installed in the bare CI job, and this test
+    # reaches it. Skipping beats failing: the job exists to prove the
+    # *Hebrew* logic needs nothing installed, not to check this.
+    pytest.importorskip("homeassistant")
     import homeassistant.components as components
     import yaml
 
@@ -1850,6 +1880,7 @@ class _Input:
         self.conversation_id = conversation_id
 
 
+@needs_executor
 def test_a_room_answers_the_question_it_was_asked():
     """"תכבה את האור" then "בסלון" has to run as one sentence.
 
@@ -1864,6 +1895,7 @@ def test_a_room_answers_the_question_it_was_asked():
         "תכבה את האור בסלון", True)
 
 
+@needs_executor
 def test_the_pending_command_is_used_once_and_dropped():
     """A stale command must not attach itself to an unrelated sentence."""
     agent = _agent()
@@ -1873,6 +1905,7 @@ def test_the_pending_command_is_used_once_and_dropped():
     assert agent._joined_with_pending(_Input("בסלון")) == ("בסלון", False)
 
 
+@needs_executor
 def test_a_follow_up_that_is_not_a_room_stands_on_its_own():
     """The speaker moved on. Their new sentence is not part of the old one."""
     agent = _agent()
@@ -2137,6 +2170,7 @@ def test_the_sentence_supplies_the_temperature_the_model_drops():
         "climate_set_temperature"
 
 
+@needs_executor
 def test_a_timer_duration_carries_hours_and_seconds():
     """"תעמיד טיימר לשעה וחצי" could only be said in minutes before v11, and
     `timer.change` takes a signed duration in seconds rather than a clock
