@@ -554,6 +554,17 @@ _STEP_SIZES: Final[tuple[tuple[tuple[str, ...], int], ...]] = (
 )
 
 
+#: What a directional verb means when the clause sizes it with nothing at all.
+#: "תגביר את הקירור" is two degrees up, and it is the *unmarked* case rather
+#: than a tier of `_STEP_SIZES` - the adverbs above modify it in both
+#: directions. Measured per clause over the corpus, on climate calls that set
+#: a temperature, take a direction verb, name no number and no size word:
+#: **186 agree, 4 disagree**, and the four all say `הרבה` or `משמעותית`
+#: through the injected noise - "הרוה פחות", "משמאותית", "הרבהיותר" - where a
+#: readable adverb would have sized it at four.
+_DEFAULT_STEP: Final[int] = 2
+
+
 def step_size(text: str) -> int | None:
     """How many steps the clause asks for in words, or ``None``."""
     if not text:
@@ -577,16 +588,25 @@ def settle_steps(arguments: dict[str, Any], text: str,
     all" - `hebrew_numbers.numbers_in` and `slot_match.temperature_from`,
     passed in rather than imported, the same arrangement as elsewhere in this
     module. With it, and only with it, a **temperature** step the model left
-    out is supplied from the words: see :data:`_STEP_SIZES`. The guard is what
+    out is supplied from the words: see :data:`_STEP_SIZES`, and
+    :data:`_DEFAULT_STEP` for the verb that names a direction and no size at
+    all. The guard is what
     the module header's rejection turned on - 106 corpus calls carry an
     absolute value under a directional verb, "תוריד את המזגן לבערך 25" lowers
     it *to* 25 - and every one of those names a number.
     """
     if (may_fill and not arguments.get("temperature_step")
-            and (size := step_size(text)) is not None
             and (way := which_way(text)) is not None):
-        arguments = dict(arguments)
-        arguments["temperature_step"] = size if way > 0 else -size
+        size = step_size(text)
+        if size is None and _hits(list(_STEP_VERBS), _tokens(text), text):
+            # Sized by nothing, but a verb that moves the thermostat is still
+            # a step and the call has to carry one. Guarded on the *verb*
+            # rather than on `which_way`, which also answers to a bare יותר or
+            # a bare חלש: those modify a step and do not make one.
+            size = _DEFAULT_STEP
+        if size is not None:
+            arguments = dict(arguments)
+            arguments["temperature_step"] = size if way > 0 else -size
     relative = {k: v for k, v in arguments.items()
                 if k in RELATIVE and isinstance(v, (int, float))
                 and not isinstance(v, bool) and v}
@@ -949,10 +969,17 @@ _CLIMATE_SWITCHED: Final[tuple[str, ...]] = (
     "פתח", "תפתח", "שתפתח", "לפתוח", "פתחי", "תפתחי", *_DO_VERBS,
 )
 
+#: A verb that asks for a *relative* move, from the strongest tier of `TIERS`.
+#: "בחדר שינה חם מדי, תקרר" carries no number and still has something to set,
+#: and the mode promotion below has to leave it alone: תקרר is the temperature
+#: going down by a step, not a request for cooling mode.
+_STEP_VERBS: Final[tuple[str, ...]] = TIERS[0][0] + TIERS[0][1]
+
 
 def settle_climate(tool: str, arguments: dict[str, Any], text: str,
                    named_mode: str | None = None,
-                   hvac_target: str | None = None) -> str:
+                   hvac_target: str | None = None,
+                   said_a_number: bool = True) -> str:
     """`climate_set_temperature` when the call carries a temperature to set.
 
     ``named_mode`` is the caller's answer to "which mode slot does this clause
@@ -993,9 +1020,25 @@ def settle_climate(tool: str, arguments: dict[str, Any], text: str,
     # Guarded on there being nothing to set, so the older reading stands
     # wherever it was doing work: "תעלה ל-24 ובמהירות גבוהה" names a fan mode
     # and really is a temperature call.
-    if (named_mode and tool in _NOT_YET_A_MODE
-            and not any(arguments.get(key) for key in _CLIMATE_TEMP_ARGS)
-            and not _hits(list(_CLIMATE_SWITCHED), _tokens(text), text)):
+    #
+    # ``said_a_number`` is the caller's answer to "does this clause name a
+    # number at all", the same question `settle_steps` asks, and it is what
+    # closes the hole the first cut of this left open. A temperature argument
+    # only counts as something to set if the sentence *backs it up* - with a
+    # number, or with a verb that asks for a relative move. The model attaches
+    # `temperature: 23` to "תעביר את המזגן לרק מאוורר" out of habit, and an
+    # invented value must not outrank a mode the speaker said out loud.
+    #
+    # Measured per clause over the whole corpus, on every climate call whose
+    # clause names a mode, names no number and takes no switching verb:
+    # 911 agree, 1 disagrees, and the one is "תקררשמץ" - the step verb glued
+    # to its adverb by the injected speech noise, which is the exception this
+    # project names rather than the rule failing.
+    tokens = _tokens(text)
+    to_set = (any(arguments.get(key) for key in _CLIMATE_TEMP_ARGS)
+              and (said_a_number or _hits(list(_STEP_VERBS), tokens, text)))
+    if (named_mode and tool in _NOT_YET_A_MODE and not to_set
+            and not _hits(list(_CLIMATE_SWITCHED), tokens, text)):
         return ("climate_set_fan_mode" if named_mode == "fan_mode"
                 else "climate_set_hvac_mode")
     if tool == "climate_set_temperature":
@@ -1100,6 +1143,41 @@ _COLOURS_ARE_ON: Final[frozenset[str]] = frozenset(
 _CLIMATE_SETS: Final[frozenset[str]] = frozenset(
     ("climate_set_temperature", "climate_set_hvac_mode", "climate_set_fan_mode"))
 
+#: A television is two devices wearing one noun, and both families claim it:
+#: `FAMILY_NOUNS` lists טלוויזיה under `media` *and* under `switch`, so
+#: `family_named` reads the ambiguity correctly and says nothing. The verb is
+#: what settles it, and it settles it cleanly:
+#:
+#:     שים טלוויזיה בסלון          52 rows   media_control / input
+#:     תכבה את הטלוויזיה בסלון     36 rows   switch_control / shut
+#:     תדליק את הטלוויזיה בסלון    29 rows   switch_control / on
+#:
+#: Putting something *on* the screen is the media player; switching the set
+#: on or off is the plug behind it. Measured per clause over the whole corpus:
+#: **65 agree, 0 disagree**, and the clauses taking neither verb - which is
+#: every one of the 52 - are not touched.
+_TV_NOUNS: Final[tuple[str, ...]] = (
+    "טלוויזיה", "טלויזיה", "הטלוויזיה", "הטלויזיה", "טיוי", "הטיוי")
+
+#: The media behaviours the model reaches for on those clauses. Written out
+#: rather than imported from `const.MEDIA_TOOLS`, because this module depends
+#: on :mod:`tool_router` for vocabulary and on nothing else - the same reason
+#: `named_mode` and `at_a_position` are passed in rather than looked up.
+_SCREEN_BEHAVIOURS: Final[frozenset[str]] = frozenset((
+    "media_play", "media_pause", "media_stop", "media_select_source",
+    "media_next_track", "media_previous_track", "media_set_volume",
+    "media_mute", "music_play"))
+
+#: ``(from these behaviours, only when the clause names one of these nouns,
+#: the on behaviour, the off behaviour)``. ``None`` for the nouns means any
+#: clause qualifies. Both rows say the same thing - the sentence switches the
+#: machine, and the model answered with something the machine *does* instead.
+_SWITCHED_BY_VERB: Final[tuple[
+        tuple[frozenset[str], tuple[str, ...] | None, str, str], ...]] = (
+    (_CLIMATE_SETS, None, "climate_turn_on", "climate_turn_off"),
+    (_SCREEN_BEHAVIOURS, _TV_NOUNS, "switch_turn_on", "switch_turn_off"),
+)
+
 
 def settle_named(behaviour: str, text: str,
                  at_a_position: bool = False,
@@ -1112,7 +1190,8 @@ def settle_named(behaviour: str, text: str,
     1. a toggle word makes it a toggle - :func:`settle_toggle` backwards;
     2. the four families in :data:`_NAMES_ITS_BEHAVIOUR`, which name their own
        behaviour and which :func:`settle_action`'s allow-list cannot reach;
-    3. a switching verb on a climate call that *sets* something;
+    3. a switching verb on a call that *does* something with the machine
+       instead - :data:`_SWITCHED_BY_VERB`, the climate set and the television;
     4. a colour makes a light an ``on`` - you cannot toggle a lamp to red;
     5. a percentage makes a cover or a valve a placement.
 
@@ -1156,13 +1235,17 @@ def settle_named(behaviour: str, text: str,
     # pair to settle. Over the corpus, one side named and not the other, a
     # self-correction disqualifying it: **235 agree** for on and **901** for
     # off, none against either.
-    if behaviour in _CLIMATE_SETS:
-        on = _hits(list(VOCABULARY["climate_turn_on"]), tokens, text)
-        off = _hits(list(VOCABULARY["climate_turn_off"]), tokens, text)
+    for sets, nouns, turn_on, turn_off in _SWITCHED_BY_VERB:
+        if behaviour not in sets:
+            continue
+        if nouns is not None and not _hits(list(nouns), tokens, text):
+            continue
+        on = _hits(list(VOCABULARY[turn_on]), tokens, text)
+        off = _hits(list(VOCABULARY[turn_off]), tokens, text)
         if on and not off:
-            return "climate_turn_on"
+            return turn_on
         if off and not on:
-            return "climate_turn_off"
+            return turn_off
     if names_a_colour and behaviour in _COLOURS_ARE_ON:
         return "light_turn_on"
     if at_a_position and behaviour in _PLACEABLE:
@@ -1286,6 +1369,12 @@ _M_PLAY: Final = _M_SEND + _M_SHUFFLE + (
                   "תשמיעי", "המשך", "תמשיך", "המשיכי", "תמשיכי", "חדש",
                   "חדשי", "להמשיך", "לנגן", "להשמיע")
 
+#: The verb the tuple above rejects, kept for the one path where the readings
+#: that beat it have all been ruled out already. See :func:`settle_media`'s
+#: last branch, and the rejection three comments up for why it is not in
+#: `_M_PLAY`.
+_M_PUT_ON: Final = ("שים", "תשים", "שימי", "תשימי", "לשים", "שם")
+
 #: Pause and stop are one decision this rule will not make. See above.
 _HALT: Final[frozenset[str]] = frozenset(("media_pause", "media_stop"))
 
@@ -1296,14 +1385,33 @@ MEDIA_BEHAVIOURS: Final[frozenset[str]] = frozenset((
     "media_select_source"))
 
 
-def settle_media(tool: str, text: str, names_a_level: bool) -> str:
+def settle_media(tool: str, text: str, names_a_level: bool,
+                 plain_request: bool = False) -> str:
     """Which of the eight speaker behaviours the sentence names.
 
     ``names_a_level`` is the caller's answer to "does the sentence carry a
     number or a percentage", passed in so this module keeps depending on
-    :mod:`slot_match` not at all.
+    :mod:`slot_match` not at all. ``nothing_to_play`` is the same arrangement
+    for "did `extract_music` find a title in this clause".
+
+    A ``music_play`` about a clause naming nothing to play is let in, and it
+    is the mirror of :func:`settle_transport` widened past next-and-previous.
+    That widening is safe *here* and was not there, because the eight-way read
+    below is not a verb list: "שים קצת מוזיקה" reaches ``media_play`` while
+    "שים את הרמקול על 40 אחוז" reaches the volume and "שים יוטיוב" the source,
+    all from the same clause shape that defeated a widened `TRANSPORT_ONLY`.
+
+    Measured per clause over the whole corpus, through this function, on
+    every media-family clause it speaks about when reached from `music_play`:
+    **2,125 agree, 9 disagree**, and all nine are the injected speech noise -
+    השםיעי, תשימ, שתנגנ, לשימ, תפסיקאת - where the glued or misspelled verb
+    is what stopped `extract_music` reading the title the clause does name.
+    That is the exception class this project names; nothing else disagrees.
     """
-    if tool not in MEDIA_BEHAVIOURS or not text:
+    if not text:
+        return tool
+    if tool not in MEDIA_BEHAVIOURS and not (
+            tool == "music_play" and plain_request):
         return tool
     if CORRECTION.search(_fold(text)):
         return tool
@@ -1330,6 +1438,16 @@ def settle_media(tool: str, text: str, names_a_level: bool) -> str:
         # A level rules a play out: "שים את הנגן על שישים אחוז" sets the
         # volume, and `הנגן` is the player rather than the imperative. Same
         # test the music upgrade uses, for the same sentence shape.
+        found = "media_play"
+    elif plain_request and not names_a_level and said(_M_PUT_ON):
+        # ``שים`` is the whole difficulty of this function, and it is why the
+        # chain above will not read it: the same verb selects a source, asks
+        # for music, sets a volume and puts a vacuum on a suction setting -
+        # 539 corpus clauses over six families. On *this* path every one of
+        # those readings has already been ruled out above: no source, no
+        # level, no title, and the model itself reached for `music_play`.
+        # What is left is the plain Israeli way of asking for something to be
+        # put on, and the corpus is unanimous about it.
         found = "media_play"
     else:
         return tool

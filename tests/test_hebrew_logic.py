@@ -2797,9 +2797,15 @@ def test_a_step_the_model_left_out_is_taken_from_the_adverb():
     """The module header rejected filling a missing step, and the reason was
     the 106 corpus calls carrying an *absolute* value under a directional verb
     - "תוריד את המזגן לבערך 25" lowers it **to** 25. Every one of those names a
-    number, so the fill is guarded on the clause naming none, and it speaks
-    only when an adverb actually sizes the step rather than defaulting to two.
-    389 agree, 1 disagree.
+    number, so the fill is guarded on the clause naming none. 389 agree, 1
+    disagree.
+
+    A verb that names a direction and *no* size at all fills two, the unmarked
+    reading the adverbs above modify in both directions. Measured per clause
+    over the corpus on climate calls that set a temperature, take a direction
+    verb and name neither a number nor a size word: 186 agree, 4 disagree, and
+    all four say `הרבה` or `משמעותית` through the injected noise - "הרוה פחות",
+    "משמאותית", "הרבהיותר" - where a readable adverb would have sized it four.
     """
     settle = DIRECTION.settle_steps
     assert settle({}, "בגן חם מדי, תנמיך קצת", True) == {"temperature_step": -1}
@@ -2807,8 +2813,12 @@ def test_a_step_the_model_left_out_is_taken_from_the_adverb():
         {"temperature_step": 4}
     # Without the caller's leave - the clause names a number - nothing is added.
     assert settle({}, "תוריד את המזגן לבערך 25", False) == {}
-    # No adverb, no fill: two is the corpus's default and not evidence.
-    assert settle({}, "תנמיך את המזגן", True) == {}
+    # No adverb: the unmarked step, and its sign still comes from the verb.
+    assert settle({}, "תנמיך את המזגן", True) == {"temperature_step": -2}
+    assert settle({}, "תגביר את המזגן", True) == {"temperature_step": 2}
+    # A direction with no verb behind it sizes nothing: יותר and חלש modify a
+    # step, they do not make one.
+    assert settle({}, "אני רוצה יותר", True) == {}
     # And a step the model did emit is still only re-signed, never resized.
     assert settle({"temperature_step": 3}, "חם מדי, תנמיך קצת", True) == \
         {"temperature_step": -3}
@@ -2844,3 +2854,237 @@ def test_switching_the_machine_is_not_setting_anything_on_it():
     # And a call that really does set something is left alone.
     assert named("climate_set_temperature", "תעלה את המזגן ל24") == \
         "climate_set_temperature"
+
+
+# --- the third round of deterministic repairs -------------------------------
+
+def test_a_question_about_the_world_is_not_an_order():
+    """The gate's own docstring named these as the work that was left: "every
+    one of them is a sentence whose device noun is real and whose meaning is
+    not". Scoring words cannot separate "כמה עולה מזגן חדש לסלון" from a
+    command - the noun really is this house's - so the shape answers the gate
+    outright, the way `ASKS_ABOUT_CONTENT` already did for songs.
+
+    Measured over all 40,631 corpus rows: the category is matched by 700 of the
+    4,462 refusals and by **zero** of the 36,169 rows that want a call.
+    """
+    off = ROUTER.looks_off_topic
+    assert off("כמה עולה מזגן חדש לסלון")
+    assert off("כמה זמן לוקח להתקין תריסים חשמליים")
+    assert off("איך מכבים מחשב שנתקע")
+    assert off("מה ההבדל בין מזגן אינוורטר לרגיל")
+    assert off("כדאי לקנות שואב אבק רובוטי")
+    assert off("תמליץ לי על מוזיקה לריצה")
+    assert off("מה מזג האוויר הטיפוסי באלסקה בחורף")
+    assert off("מה יש בטלוויזיה הערב")
+    assert off("שלח הודעה לדני בוואטסאפ")
+    assert off("תוסיף פגישה ליומן מחר בעשר")
+    # And the orders that share their nouns are still orders.
+    assert not off("תדליק את המזגן בסלון")
+    assert not off("תסגור את התריסים בחדר השינה")
+    # `תכתוב לי` is how this corpus adds to a list, on 37 rows, and stays out.
+    assert not off("תכתוב לי בננות לרשימת המצרכים")
+
+
+def test_asking_for_something_names_no_device_and_is_still_an_order():
+    """The mirror of the category above. Israelis ask for music by asking for
+    *something*, and `משהו` is a pronoun - the sentence scores nothing for any
+    family and 22 genuine requests were refused.
+
+    The verb is what makes it safe: 196 corpus utterances pair `משהו` with a
+    play-or-put verb and every one wants a call, while the 84 that say `משהו`
+    and want none are all "תספר לי משהו על הדינוזאורים".
+    """
+    assert ROUTER.asks_for_something("שים משהו")
+    assert ROUTER.asks_for_something("תשימי לנו משהו טוב")
+    assert ROUTER.asks_for_something("תפעילי משהו בחניון")
+    assert not ROUTER.asks_for_something("תספר לי משהו על הדינוזאורים")
+    assert not ROUTER.looks_off_topic("שימי לנו משהו")
+    assert ROUTER.looks_off_topic("תספר לי משהו על מגדל אייפל")
+
+
+def test_an_invented_temperature_does_not_outrank_a_mode_that_was_spoken():
+    """The guard on the mode promotion asked whether the *call* carried a
+    temperature. The model attaches `temperature: 23` to "תעביר את המזגן לרק
+    מאוורר" out of habit, so the guard held on a value nobody said and the
+    clause kept a temperature behaviour with nowhere to put its mode.
+
+    Now the sentence has to back the argument up - with a number, or with a
+    verb that asks for a relative move. Measured per clause over the corpus on
+    every climate call whose clause names a mode, names no number and takes no
+    switching verb: 911 agree, 1 disagrees, and the one is `תקררשמץ`.
+    """
+    settle = DIRECTION.settle_climate
+    # No number in the sentence: the mode wins over the invented temperature.
+    assert settle("climate_set_temperature", {"temperature": 23},
+                  "תעביר את המזגן לרק מאוורר", "hvac_mode",
+                  None, False) == "climate_set_hvac_mode"
+    # A number in the sentence: it really is a temperature call.
+    assert settle("climate_set_temperature", {"temperature": 23},
+                  "שים את המזגן על 23 במהירות גבוהה", "fan_mode",
+                  None, True) == "climate_set_temperature"
+    # And a relative verb is something to set even with no number at all.
+    assert settle("climate_set_temperature", {"temperature_step": -2},
+                  "בחדר שינה חם מדי, תקרר", "hvac_mode",
+                  None, False) == "climate_set_temperature"
+
+
+def test_the_car_is_not_the_automatic_mode():
+    """`hvac_mode` dropped the clipped `אוטו` for this reason and its sibling
+    table kept it: it is also the Hebrew for *car*, and "ליד האוטו" - beside
+    the car - is how this corpus says the garage.
+
+    357 corpus clauses say a bare אוטו and **not one** wants auto as a mode.
+    """
+    assert SLOT.setting_from("שים את המזגן ליד האוטו על עשרים",
+                             "fan_mode") is None
+    assert SLOT.mode_slot("תעמיד את המזגן ליד האוטו על עשרים") is None
+    # The word itself still reads, spelled out.
+    assert SLOT.setting_from("שים את המאוורר על אוטומטי", "fan_mode") == "auto"
+
+
+def test_a_television_is_switched_and_played_by_different_verbs():
+    """Both families claim טלוויזיה - `FAMILY_NOUNS` lists it under `media` and
+    under `switch` - so `family_named` reads the ambiguity and says nothing.
+    The verb settles it, and the corpus is unanimous: 52 rows put something
+    *on* the screen and 65 switch the set, with no overlap.
+    """
+    named = DIRECTION.settle_named
+    assert named("media_select_source", "תכבה את הטלוויזיה בסלון") == \
+        "switch_turn_off"
+    assert named("media_play", "תדליק את הטלוויזיה בחדר השינה") == \
+        "switch_turn_on"
+    # Putting something on the screen is still the media player.
+    assert named("media_select_source", "שים טלוויזיה בסלון") == \
+        "media_select_source"
+
+
+def test_a_request_that_names_nothing_to_play_asks_for_no_particular_thing():
+    """`settle_transport` says this already for next-and-previous, and the
+    widening it refuses - reading `שים` as a transport verb - is safe here
+    because the eight-way read is not a verb list: a source, a level and a
+    title are all ruled out above before the verb is reached.
+
+    Measured through the function over the whole corpus, on every media-family
+    clause it speaks about when reached from `music_play`: 2,125 agree, 9
+    disagree, and all nine are the injected speech noise.
+    """
+    settle = DIRECTION.settle_media
+    assert settle("music_play", "שים קצת מוזיקה", False, True) == "media_play"
+    assert settle("music_play", "תשימי לנו משהו", False, True) == "media_play"
+    # Not a plain request and this branch never opens: a `music_play` about a
+    # clause naming a level or a source is left exactly as the model sent it.
+    assert settle("music_play", "שים את הרמקול על 40 אחוז", True, False) == \
+        "music_play"
+    # Reached from a media behaviour, the eight-way read settles what it
+    # always has, and `שים` still never gets that far - the level on that
+    # clause is `NUMBER_SLOT`'s to fill, not this function's to promote on.
+    assert settle("media_play", "שים יוטיוב בסלון", False, False) == \
+        "media_select_source"
+    assert settle("media_play", "תגביר את הווליום בסלון", False, False) == \
+        "media_set_volume"
+    assert SLOT.a_plain_request("שים קצת מוזיקה")
+    assert not SLOT.a_plain_request("שים את תחנת הרדיו אקו 99")
+
+
+def test_a_station_is_named_with_a_number_and_that_is_not_a_level():
+    """"שים את השיר על שישים" is a volume, which is why a number rules a play
+    out - but an Israeli radio station *is* named with one. אקו 99, כאן 88,
+    and songs too: חורף 73. 47 corpus clauses turn on this and every one is
+    `music_play`.
+
+    Only a title whose number is written in digits, because a level said out
+    loud is a word: without that, `extract_music` scraping "על הדשא על שישים"
+    out of a volume request would take the level away with it.
+    """
+    level = SLOT.names_a_level
+    assert level("ערבב את תחנת הרדיו אקו 99")
+    assert not level("ערבב את תחנת הרדיו אקו 99", "אקו 99")
+    assert not level("תשמיע את השיר חורף 73", "חורף 73")
+    # A level inside the scraped title is still a level.
+    assert level("תשים את השיר על הדשא על שישים", "על הדשא על שישים")
+
+
+def test_whether_asks_which_when_the_adjective_is_plural():
+    """`האם` asks yes-or-no about one thing and *which* about several, and
+    Hebrew marks the difference on the adjective rather than on the question
+    word. 171 corpus clauses turn on it, every one a `get_state`.
+    """
+    assert SLOT.state_filter("האם השקעים כבויים בסלון") == "off"
+    assert SLOT.state_filter("האם המאווררים דולקים") == "on"
+    # The singular still wants yes or no, which is the guard this began as.
+    assert SLOT.state_filter("תבדוק אם האור בגן דולק") is None
+
+
+def test_a_colour_temperature_outranks_the_colour_inside_it():
+    """"לבן חם" is 2700K and the "לבן" in it is not a colour. The multi-word
+    rule settles that inside one table and cannot see across two, so
+    `SETTING_SLOT["light_turn_on"]` asked the lamp for warm white *and* plain
+    white in the same call. 32 corpus clauses name both; all 32 want the
+    temperature alone.
+    """
+    assert SLOT.setting_from("אני רוצה לבן חם בסלון", "color_temp_k") == "2700"
+    assert SLOT.setting_from("אני רוצה לבן חם בסלון", "color_name") is None
+    # A colour on its own is untouched.
+    assert SLOT.setting_from("תדליק אור לבן בסלון", "color_name") == "white"
+
+
+def test_a_setting_the_schema_types_as_an_integer_is_sent_as_one():
+    """`SETTING_WORDS` is strings throughout so the tables read the same way,
+    and `tools.json` declares `color_temp_k` as an integer with an enum of
+    four. Written straight through, the call carried "2700" where gold and the
+    schema carry 2700 - a wrong argument on the wire, and an exact-match
+    failure on every row naming a colour temperature.
+    """
+    assert CONST.INTEGER_SETTING == frozenset(("color_temp_k",))
+    schema = json.loads((COMPONENT / "tools.json").read_text(encoding="utf-8"))
+    light = next(t for t in schema if t["name"] == "light_control")
+    assert light["parameters"]["properties"]["color_temp_k"]["type"] == "integer"
+    for slot in CONST.INTEGER_SETTING:
+        for value in SLOT.SETTING_WORDS[slot].values():
+            assert int(value)  # every one of them casts
+
+
+def test_taking_something_off_a_list_still_names_the_list():
+    """`מ` and `מה` are the prefix a *removal* takes and they were missing, so
+    every sentence that took something off a list lost which list it meant.
+    119 corpus calls, and `list` was the worst-read slot in the table by an
+    order of magnitude because of it: 218 wrong, now 98.
+    """
+    assert SLOT.setting_from("תוריד תפוחים מהקניות", "list") == "shopping"
+    assert SLOT.setting_from("תסיר לי לתאם פגישה מהמשימות", "list") == "todo"
+    # And the prefix an addition takes still reads, as it always did.
+    assert SLOT.setting_from("תוסיף חלב לקניות", "list") == "shopping"
+
+
+def test_a_room_inside_a_device_name_is_part_of_the_device():
+    """"דלת החניה" is the garage door and the חניה in it is part of what the
+    device is called. "תסגור את דלת החניה בסלון" closes the garage door, and
+    the sentence puts it in the living room: the resolver answered `parking`
+    for 19 of the 230 corpus clauses naming one of these.
+
+    Blanked rather than filtered, because `find_occurrences` returns one hit
+    per value - on "דלת החניה ליד האוטו" the only `parking` hit is the one
+    inside the device name, and dropping it loses the room the sentence names.
+    """
+    blank = SLOT.without_device_names
+    assert "חניה" not in blank("תסגור את דלת החניה בסלון")
+    assert "סלון" in blank("תסגור את דלת החניה בסלון")
+    # The room named twice, once inside the device's name and once outside it.
+    assert "האוטו" in blank("תפתח את דלת החניה ליד האוטו")
+    # A sentence with no such phrase is returned unchanged.
+    assert blank("תסגור את התריס בסלון") == "תסגור את התריס בסלון"
+
+
+def test_wait_no_takes_the_order_back_like_every_other_retraction():
+    """"רגע לא" - wait, no - is how this corpus says it on 183 rows, and it
+    was the one member of the category missing. The retained half names the
+    gold behaviour on 156 of the 165 it cuts, and the nine are `תעשה`, whose
+    `light_turn_on` vocabulary this check cannot see rather than the rule
+    failing.
+    """
+    after = CLAUSE.after_a_correction
+    assert after("תדליק את הנורה... רגע לא תסגור את הנורה בסלון") == \
+        "תסגור את הנורה בסלון"
+    # Nothing after the retraction leaves the sentence whole, as it always did.
+    assert after("כאילו אה רגע לא בבקשה תודה") == "כאילו אה רגע לא בבקשה תודה"

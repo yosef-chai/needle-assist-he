@@ -166,9 +166,21 @@ for _slug in FLOOR_ALIASES:
 #
 # Consulted at tier 1, below the household's own floor names, and only for a
 # floor this installation actually has: see `slot_match.Slots._floor_index`.
+# `למטה` and `למעלה` are how a household actually says which floor - "סגור את
+# הווילונות למטה", "בקומה למטה" - and neither the registry names nor the
+# phrases below reached them, so every one of those sentences lost its floor.
+#
+# The obvious worry is that both words are also directions: "תוריד את התריס
+# למטה" lowers a blind. Measured over the corpus, 191 clauses say one of the
+# two and they separate on a line that is already drawn - 113 belong to a tool
+# that *has* a floor argument and every one of them names the floor the word
+# says; the other 78 belong to `notify_send`, where "תשלח הודעה לכולם שתרדו
+# למטה" is a message and not a target, and the `"floor" in takes` guard both
+# pipelines already apply keeps the fill away from them. 113 agree, 0 disagree.
 FLOOR_PHRASES: Final[dict[str, list[str]]] = {
-    "upper": ["קומה עליונה", "הקומה העליונה", "קומה שנייה", "קומה שניה"],
-    "lower": ["קומה תחתונה", "הקומה התחתונה"],
+    "upper": ["קומה עליונה", "הקומה העליונה", "קומה שנייה", "קומה שניה",
+              "למעלה"],
+    "lower": ["קומה תחתונה", "הקומה התחתונה", "למטה"],
     "ground": ["קומת קרקע", "קומת הקרקע", "קומת כניסה", "קומת הכניסה",
                "קרקע", "קומה ראשונה", "הקומה הראשונה"],
     "basement": ["מרתף", "בייסמנט"],

@@ -523,6 +523,17 @@ SETTING_SLOT: Final[dict[str, tuple[str, ...]]] = {
     "list_remove_item": ("list",),
 }
 
+#: Setting slots whose schema declares an integer. `slot_match.SETTING_WORDS`
+#: is one type throughout - strings, so the tables read the same way - and
+#: `tools.json` declares `color_temp_k` as ``integer`` with an enum of four.
+#: Written straight through, the fill contradicts the tool's own contract:
+#: the call carries ``"2700"`` where every gold call and the schema carry
+#: 2700, which is a wrong argument on the wire and an exact-match failure on
+#: every row that names a colour temperature. `executor._service_data` cast it
+#: on the way to Home Assistant, so the household never saw it and nothing
+#: pointed at it.
+INTEGER_SETTING: Final = frozenset(("color_temp_k",))
+
 # The audio tools a named title can be promoted out of. `music_play` is absent
 # because it is the destination, and the query tools because a question about
 # music is not a request to play it.

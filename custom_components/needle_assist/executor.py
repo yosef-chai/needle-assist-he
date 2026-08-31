@@ -75,6 +75,7 @@ from .const import (
     FALLBACK_DOMAINS,
     HEBREW_MONTHS,
     HELPER_IS_A_TIMER,
+    INTEGER_SETTING,
     LIST_INTEGRATIONS,
     LIST_ITEM_KEY,
     MEDIA_TOOLS,
@@ -397,7 +398,9 @@ class CallExecutor:
             if not utterance or slot not in allowed:
                 continue
             if (said := slot_match.setting_from(utterance, slot)) is not None:
-                data[slot] = said
+                # The tables are strings throughout; the schema is not.
+                # See `const.INTEGER_SETTING`.
+                data[slot] = int(said) if slot in INTEGER_SETTING else said
 
         if tool == "media_set_volume":
             # HA takes volume_level as 0..1; the model speaks in percent.
@@ -504,7 +507,12 @@ class CallExecutor:
         which is how a two-room sentence gets its two rooms in the right order.
         """
         name = call.get("name", "")
-        args = dict(call.get("arguments") or {})
+        # A blank string is the model failing to fill a slot, not a value it
+        # chose. Gold carries none in 60k corpus calls, and the row pays twice
+        # for one: an invented argument and a lost exact match. Eight rows of
+        # the frozen benchmark, every one a `name` on a timer or a button.
+        args = {k: v for k, v in (call.get("arguments") or {}).items()
+                if not (isinstance(v, str) and not v.strip())}
 
         # What the model emits is ``(tool, action)``; what everything below
         # this line speaks is the **virtual id** - the per-service name the
@@ -629,7 +637,11 @@ class CallExecutor:
                 slot_match.mode_slot(utterance),
                 None if (slot_match.setting_from(utterance, "fan_mode")
                          or slot_match.temperature_from(utterance))
-                else slot_match.hvac_target(utterance))
+                else slot_match.hvac_target(utterance),
+                # The same test `settle_steps` gets below: no temperature said
+                # and no digit either. A `temperature` on such a clause was
+                # invented, and it must not outrank a mode that was spoken.
+                not slot_match.unsupported(utterance, "temperature"))
             if settled != tool:
                 _LOGGER.debug("%s carries a temperature, so it is %s",
                               tool, settled)
@@ -692,9 +704,11 @@ class CallExecutor:
         # `is_volume_muted` is not an argument of that. The same defect
         # `settle_climate` had, one family over - settle the behaviour, then
         # fill its slots. `evaluate.py` runs it in this place too.
-        if utterance and tool in direction.MEDIA_BEHAVIOURS:
+        if utterance and (tool in direction.MEDIA_BEHAVIOURS
+                          or tool == "music_play"):
             settled = direction.settle_media(
-                tool, utterance, slot_match.names_a_level(utterance))
+                tool, utterance, slot_match.names_a_level(utterance),
+                slot_match.a_plain_request(utterance))
             if settled != tool:
                 _LOGGER.debug("the sentence says %s, not %s", settled, tool)
                 tool = settled
@@ -788,7 +802,8 @@ class CallExecutor:
             if request is not None and (
                     tool == "media_play"
                     or (request.media_type
-                        and not slot_match.names_a_level(utterance))):
+                        and not slot_match.names_a_level(
+                            utterance, request.media_id))):
                 _LOGGER.debug("the sentence names something to play; using "
                               "music_play instead of %s", tool)
                 tool = "music_play"

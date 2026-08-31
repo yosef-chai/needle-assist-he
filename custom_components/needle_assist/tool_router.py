@@ -1538,9 +1538,57 @@ ASKS_ABOUT_CONTENT: Final[tuple[str, ...]] = (
     "של מי השיר", "איך קוראים לשיר", "מה שם השיר",
 )
 
+# The same argument, widened past songs, and it is the piece `looks_off_topic`
+# names as the remaining work: "twenty-three of the 285 can still reach a tool
+# that moves something, and every one of them is a sentence whose device noun
+# is real and whose meaning is not". Scoring words cannot separate them,
+# because the nouns really are this house's - a lamp, a blind, a computer, a
+# television - and the sentence is a question about the world that happens to
+# mention one.
+#
+# What they share is a *shape*, and Hebrew marks each one plainly:
+#
+#   a price          כמה עולה מזגן חדש לסלון
+#   a purchase       כדאי לקנות שואב אבק רובוטי
+#   an errand        כמה זמן לוקח להתקין תריסים חשמליים
+#   the impersonal   איך מכבים מחשב שנתקע      <- plural, never an imperative
+#   a comparison     מה ההבדל בין מזגן אינוורטר לרגיל
+#   a request to     תמליץ לי על מוזיקה לריצה
+#   compose or pick  כתוב לי שיר על החתול שלי
+#   the assistant    אתה אדם או מחשב
+#   the world's      מה מזג האוויר הטיפוסי באלסקה בחורף
+#   listings         מה יש בטלוויזיה הערב
+#   a name, a body   אור זה שם יפה לילדה / יש לי חום שלושים ושמונה מעלות
+#   another app      שלח הודעה לדני בוואטסאפ / תוסיף פגישה ליומן מחר
+#
+# `תכתוב לי` is deliberately absent and `כתוב לי` is not: the prefixed form is
+# how this corpus adds to a list - "תכתוב לי בננות לרשימת המצרכים" - and it is
+# said by 37 rows that want `list_edit`. `לילה טוב` went the same way, on 66
+# rows naming the playlist. Closed categories are written with their siblings
+# in, so the forms the corpus never says are here too.
+#
+# Measured over all 40,631 rows: matched by 700 of the 4,462 refusals and by
+# **zero** of the 36,169 rows that want a call, which is the licence to answer
+# the gate outright rather than adjust a score.
+ASKS_ABOUT_THE_WORLD: Final[tuple[str, ...]] = (
+    "כמה עולה", "כמה יעלה", "כדאי לקנות", "שווה את הכסף", "יש הנחה",
+    "איפה יש", "איפה קונים",
+    "כמה זמן לוקח",
+    "איך מכבים", "איך מדליקים", "איך מתקינים", "איך עושים",
+    "איך פותחים", "איך סוגרים", "איך מחליפים",
+    "מה ההבדל בין", "מה עדיף",
+    "תמליץ", "המלץ", "כתוב לי", "כתבי לי",
+    "אתה אדם",
+    "מה יש בטלוויזיה", "הטיפוסי",
+    "זה שם", "יש לי חום",
+    "בוואטסאפ", "בווטסאפ", "ליומן",
+)
+
+
 _ABOUT_CONTENT: Final = re.compile(
     "(?<![א-ת])(?:"
-    + "|".join(re.escape(normalise(_p)) for _p in ASKS_ABOUT_CONTENT)
+    + "|".join(re.escape(normalise(_p))
+               for _p in ASKS_ABOUT_CONTENT + ASKS_ABOUT_THE_WORLD)
     + ")(?![א-ת])")
 
 
@@ -1548,6 +1596,36 @@ _NOT_HERE: Final = re.compile(
     "(?<![א-ת])(?:"
     + "|".join(re.escape(normalise(_p)) for _p in NOT_THIS_HOUSE)
     + ")(?![א-ת])")
+
+
+#: The mirror of the two categories above, and it answers the gate the other
+#: way. Israelis ask for music by asking for *something*: "שים משהו",
+#: "תפעילי משהו טוב", "ערבבי לנו משהו". `משהו` is a pronoun, so the sentence
+#: names no device, scores nothing for any family and was refused - 22 genuine
+#: media requests on this corpus, and it is the one non-typo class left in the
+#: gate's false refusals.
+#:
+#: The verb is what makes it safe, and the corpus draws the line sharply:
+#: **196 utterances pair `משהו` with a play-or-put verb and every one of them
+#: wants a call**, while the 84 that say `משהו` and want none are all "תספר לי
+#: משהו על הדינוזאורים" - tell me *about* something - which names no such verb
+#: and stays refused.
+_SOMETHING: Final = re.compile(r"(?<![א-ת])משהו(?![א-ת])")
+
+_PUT_SOMETHING_ON: Final[tuple[str, ...]] = (
+    *TOOL_HINTS.get("media_play", ()), *TOOL_HINTS.get("music_play", ()),
+    "הפעל", "תפעיל", "הפעילי", "תפעילי", "להפעיל",
+    # The feminine and infinitive of `שים`, which the router's hint list does
+    # not carry because it never needed them to *route*.
+    "שימי", "תשימי", "לשים",
+)
+
+
+def asks_for_something(query: str) -> bool:
+    """True when the sentence asks for *something* to be put on."""
+    if not query or not _SOMETHING.search(normalise(query)):
+        return False
+    return bool(_hits(list(_PUT_SOMETHING_ON), _tokens(query), query))
 
 
 def _sounds_like_an_order(query: str) -> bool:
@@ -1668,8 +1746,13 @@ def looks_off_topic(query: str, threshold: int = REFUSE_BELOW) -> bool:
     # outright rather than adding to a score.
     if names_a_clock(query):
         return False
-    # And its mirror: a question about who performed something is about the
-    # world, not about this house. See :data:`ASKS_ABOUT_CONTENT`.
+    # And the other sentence that names no device and is still an order.
+    # See :func:`asks_for_something`.
+    if asks_for_something(query):
+        return False
+    # And its mirror: a question about who performed something, what a thing
+    # costs or how one is installed is about the world, not about this house.
+    # See :data:`ASKS_ABOUT_CONTENT` and :data:`ASKS_ABOUT_THE_WORLD`.
     if _ABOUT_CONTENT.search(normalise(query)):
         return True
     scored = score_families(query)

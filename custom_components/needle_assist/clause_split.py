@@ -77,7 +77,7 @@ _PUNCT: Final = ".,!?;:'\"״׳()[]-–—"
 # the same reason: the verb it would read is the one being retracted.
 CORRECTION: Final = re.compile(_fold("|".join((
     r"\bבעצם\b", r"\bטעות\b", r"\bסליחה\b", r"\bלא לא\b", r"\bאה לא\b",
-    r"\bלא,", r"\bבמקום\b",
+    r"\bלא,", r"\bבמקום\b", r"\bרגע לא\b",
 ))))
 
 # Phrases that join two orders. Stored folded and space-separated so a

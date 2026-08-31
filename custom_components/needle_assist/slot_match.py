@@ -390,7 +390,13 @@ SETTING_WORDS: Final[dict[str, dict[str, str]]] = {
         "נמוך": "low", "נמוכה": "low", "חלש": "low",
         "בינוני": "medium", "בינונית": "medium",
         "גבוה": "high", "גבוהה": "high", "חזק": "high",
-        "אוטומטי": "auto", "אוטו": "auto",
+        # No "אוטו", for the reason `hvac_mode` states below, and it was left
+        # here when that one was written: the clipped form is also the Hebrew
+        # for *car*, and "ליד האוטו" - beside the car - is how this corpus
+        # says the garage. 357 clauses say a bare אוטו and **not one** of them
+        # wants auto as a mode; every one names the parking. Left in, four of
+        # them reached `climate_set_fan_mode` with a speed nobody asked for.
+        "אוטומטי": "auto", "אוטומט": "auto", "אוטומטית": "auto",
     },
     # Which *kind* of cover. "תפתח את התריסים בסלון" and "תפתח את הווילונות
     # בסלון" are two different commands in a room that has both, and without
@@ -534,7 +540,13 @@ SETTING_WORDS: Final[dict[str, dict[str, str]]] = {
 #: ``וה`` completes the pair: "התריסים והווילונות" carries a conjunction over
 #: an article, and without it only the first of the two was found - which
 #: reads as one unambiguous value rather than as the two that settle nothing.
-_VALUE_PREFIXES: Final = ("", "ב", "ל", "ו", "וב", "ול", "כ", "ה", "וה")
+#: ``מ`` and ``מה`` are the prefix a *removal* takes - "תוריד גבינה
+#: מהקניות", "תסיר לי לתאם פגישה מהמשימות" - and they were missing, so
+#: every sentence that took something *off* a list lost which list it
+#: meant: 119 corpus calls, and `list` was the worst-read slot in this
+#: table by an order of magnitude because of it.
+_VALUE_PREFIXES: Final = ("", "ב", "ל", "ו", "וב", "ול", "כ", "ה", "וה",
+                          "מ", "מה", "ומ", "ומה")
 
 _SETTING_FOLDED: Final[dict[str, dict[str, str]]] = {
     slot: {normalise(word): value for word, value in table.items()}
@@ -548,6 +560,16 @@ _OBJECT_IS_THE_DEVICE: Final = frozenset(
     ("hvac_mode", "fan_mode", "fan_speed", "source"))
 
 
+#: A slot whose value can be swallowed whole by a longer phrase belonging to a
+#: *different* slot. The multi-word rule below settles this inside one table -
+#: "דלת חניה" beats "דלת" - and cannot see across two, so "לבן חם" was read as
+#: the colour temperature 2700 by one table and as the colour `white` by the
+#: other. `SETTING_SLOT["light_turn_on"]` fills both, so the lamp was asked for
+#: warm white *and* plain white in the same call. 32 corpus clauses name both,
+#: and all 32 want the temperature alone.
+_OUTRANKED_BY: Final[dict[str, str]] = {"color_name": "color_temp_k"}
+
+
 def setting_from(utterance: str, slot: str) -> str | None:
     """The value the sentence names for ``slot``, or ``None``.
 
@@ -557,6 +579,9 @@ def setting_from(utterance: str, slot: str) -> str | None:
     """
     table = _SETTING_FOLDED.get(slot)
     if not table or not utterance:
+        return None
+    longer = _OUTRANKED_BY.get(slot)
+    if longer is not None and setting_from(utterance, longer) is not None:
         return None
     found: set[str] = set()
 
@@ -718,6 +743,12 @@ def mode_slot(utterance: str) -> str | None:
 _LEVEL: Final = re.compile(
     r"(\d|אחוז|עשרים|שלושים|ארבעים|חמישים|שישים|שבעים|שמונים|תשעים|מאה)")
 
+#: The same list without the digit, which is what tells a *level* from a
+#: *name*: a station and a song are named in figures - אקו 99, כאן 88, חורף 73
+#: - and a level asked for out loud is a word. See :func:`names_a_level`.
+_SPOKEN_LEVEL: Final = re.compile(
+    r"(אחוז|עשרים|שלושים|ארבעים|חמישים|שישים|שבעים|שמונים|תשעים|מאה)")
+
 
 #: Questions that ask *which* things are in a state, rather than *whether* one
 #: is. See :func:`state_filter`.
@@ -725,6 +756,18 @@ _WHICH_ARE: Final = re.compile(
     r"\b(אילו|איזה|איזו|כמה"
     r"|מה\s+פתוח|מה\s+סגור|מה\s+דולק|מה\s+כבוי|מה\s+פועל)\b"
     r"|\bהאם\s+כל\b")
+
+#: `האם` asks yes-or-no about one thing and asks *which* about several, and
+#: Hebrew marks the difference on the adjective rather than on the question
+#: word: "האם האור דולק" wants yes or no, "האם האורות דולקים" wants the list.
+#: The plural is the whole signal, so the noun need not be read at all.
+#: Measured per clause over the corpus, on the clauses `_WHICH_ARE` alone
+#: leaves silent: **171 agree, 0 disagree**, every one of them `get_state`.
+_WHETHER: Final = re.compile(r"(?<![א-ת])האם(?![א-ת])")
+_PLURAL_STATE: Final = re.compile(
+    r"(?<![א-ת])(?:כבויים|כבויות|מכובים|מכובות|דולקים|דולקות"
+    r"|פתוחים|פתוחות|סגורים|סגורות|פועלים|פועלות"
+    r"|מופעלים|מופעלות)(?![א-ת])")
 
 
 def state_filter(utterance: str) -> str | None:
@@ -749,14 +792,66 @@ def state_filter(utterance: str) -> str | None:
     interrogative test was measured too: 544 right and **127 wrong**, every one
     of them a yes/no question turned into a list.
     """
-    if not utterance or not _WHICH_ARE.search(utterance):
+    if not utterance:
+        return None
+    if not (_WHICH_ARE.search(utterance)
+            or (_WHETHER.search(utterance)
+                and _PLURAL_STATE.search(utterance))):
         return None
     return setting_from(utterance, "state")
 
 
-def names_a_level(utterance: str) -> bool:
-    """True when the sentence names a number, which a title does not."""
+def names_a_level(utterance: str, title: str | None = None) -> bool:
+    """True when the sentence names a number, which a title does not.
+
+    ``title`` is what :func:`extract_music` read off the same sentence, and it
+    is taken out before the test, because the premise fails on the one thing
+    Israelis listen to most: a radio station **is named with a number**. אקו
+    99, כאן 88, רדיו לב המדינה 103 - and songs too, חורף 73. Under the plain
+    reading "ערבב את תחנת הרדיו אקו 99" names a level, which blocked the
+    upgrade to `music_play` and left the sentence answered with a *pause*.
+
+    Only a title whose number is written in **digits**, which is the whole of
+    the class: a station and a song are named 99, 88, 103, 73, while a level
+    said out loud is a word - "על שישים", "עשרים אחוז". Without that guard
+    `extract_music` scraping "על הדשא על שישים" out of "תשים את השיר על הדשא
+    על שישים" would take the level away with it and turn a volume into a track.
+
+    Measured per clause over the whole corpus, on the clauses where taking the
+    title out changes the answer: **47, and every one of them is
+    ``music_play``**. Nothing else in the corpus reads a number that way.
+    """
+    if title and not _SPOKEN_LEVEL.search(title):
+        utterance = utterance.replace(title, " ")
     return bool(_LEVEL.search(utterance))
+
+
+def a_plain_request(utterance: str) -> bool:
+    """True when the clause asks for something and names nothing in particular.
+
+    The four readings that beat ``שים`` - a title, a source, a percentage, a
+    number said in words - asked one at a time, so that `direction.settle_media`
+    can read the verb once they have all come back empty. It lives here rather
+    than at the two call sites because both pipelines have to ask it the same
+    way, and it lives here rather than in :mod:`direction` because that module
+    depends on :mod:`tool_router` for vocabulary and on nothing else.
+
+    `names_a_level` is deliberately *not* one of the four: it is passed to the
+    same function separately and reads digits, and this adds the three the
+    corpus says out loud - חצי, מקסימום, "על חמישה עשר".
+    """
+    if not utterance:
+        return False
+    named = extract_music(utterance)
+    # A request with no *kind* is `extract_music` scraping what is left of the
+    # sentence rather than reading a title out of it: "תנגן מוזיקה על המרפסת
+    # בבקשה" came back with the media_id "על המרפסת בבקשה", the room and the
+    # politeness. Nothing to play, whatever the field says.
+    if named is not None and named.media_type is not None:
+        return False
+    return (setting_from(utterance, "source") is None
+            and percent_from(utterance) is None
+            and not hebrew_numbers.numbers_in(utterance))
 
 
 #: Units that belong to some other argument. A number wearing one of these is
@@ -1201,6 +1296,44 @@ def _outside(matches: list[Any], wider: list[Any]) -> list[Any]:
                        for w in wider)]
 
 
+#: Device phrases that carry a room's name inside them. "דלת החניה" is the
+#: garage door and the חניה in it is part of what the device is *called*, not
+#: where it is - so "תסגור את דלת החניה בסלון" closes the garage door and the
+#: sentence puts it in the living room. The resolver answered `parking` for
+#: **19 of the 230** corpus clauses naming one of these, every one a clause
+#: that went on to name a different room outright.
+#:
+#: :func:`_outside` already settles this containment twice - a device inside a
+#: room's name is the room, a room inside a floor's name is the floor. This is
+#: the third level of the same ambiguity and the same rule closes it.
+_DEVICE_PHRASES: Final[PhraseIndex] = PhraseIndex()
+for _phrase in _COMPOUND_COVER:
+    _DEVICE_PHRASES.add(_phrase, _phrase)
+
+
+def without_device_names(utterance: str) -> str:
+    """``utterance`` with every device phrase carrying a room name blanked out.
+
+    Blanked to spaces rather than cut, so every offset still lines up with the
+    original - the callers compare area spans against floor spans, and a
+    shortened string would misplace both.
+
+    Filtering the matches afterwards was the first cut and it is wrong:
+    `find_occurrences` returns one hit per value, so on "תפתח את דלת החניה ליד
+    האוטו" - the garage door, beside the car, one room named twice - the only
+    `parking` hit is the one inside the device name, and dropping it loses the
+    room the sentence really did name. Taking the phrase out first lets the
+    second mention be found on its own.
+    """
+    if not utterance:
+        return utterance
+    blanked = list(utterance)
+    for match in _DEVICE_PHRASES.find_occurrences(utterance, fuzzy=False):
+        for position in range(match.start, match.end):
+            blanked[position] = " "
+    return "".join(blanked)
+
+
 def build_area_index(areas: Iterable[tuple[str, str, Iterable[str]]]) -> PhraseIndex:
     """Phrase index over ``(area_id, name, aliases)`` triples.
 
@@ -1284,7 +1417,8 @@ class SlotIndex:
 
     def areas(self, utterance: str) -> list[str]:
         """Every area named in the sentence, in the order it was said."""
-        return [m.value for m in self._area_index().find_all(utterance)]
+        return [m.value for m in self._area_index().find_all(
+            without_device_names(utterance))]
 
     # -- floors -------------------------------------------------------------
     def _floor_index(self) -> PhraseIndex:
@@ -1303,9 +1437,10 @@ class SlotIndex:
         household's own name always wins, and it is keyed on the *slug* the
         registry name resolves to, so it can only ever reach a floor this
         installation already has. Measured on the held-out set, it takes the
-        floor rows the sentence reaches from 46 of 76 to **63 of 76**, with
-        zero contradicted. The remaining 13 all say "למטה", which is excluded
-        on purpose: see `area_map.FLOOR_PHRASES`.
+        floor rows the sentence reaches from 46 of 76 to 63, and to **76 of
+        76** once `למטה` and `למעלה` joined the table - the plain words for
+        upstairs and down, which the first cut left out for fear of the
+        direction reading. See `area_map.FLOOR_PHRASES` for what settled it.
         """
         if self._floors is not None:
             return self._floors
@@ -1440,8 +1575,9 @@ class SlotIndex:
         16 rows over the corpus, every one of them a floor read as a room, and
         none the other way.
         """
-        found = _outside(self._area_index().find_occurrences(utterance),
-                         self._floor_index().find_occurrences(utterance))
+        found = _outside(
+            self._area_index().find_occurrences(without_device_names(utterance)),
+            self._floor_index().find_occurrences(utterance))
         if not found:
             return []
         if len(found) == total and 0 <= index < total:
