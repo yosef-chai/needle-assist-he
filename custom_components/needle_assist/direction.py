@@ -152,7 +152,7 @@ from __future__ import annotations
 from typing import Any, Final
 
 from .clause_split import CORRECTION
-from .tool_router import TOOL_HINTS, _fold, _hits, _tokens
+from .tool_router import TOOL_HINTS, _fold, _hits, _hits_noisy, _tokens
 
 #: Tools that come in a pair the Hebrew words settle. Volume against play is
 #: deliberately absent; see the module docstring.
@@ -386,12 +386,16 @@ HINT_DECIDED: Final[frozenset[str]] = frozenset((
 _DO_VERBS: Final = ("תעשה", "תעשי", "עשה", "עשי", "לעשות", "שיעשה")
 
 
-def settle_toggle(tool: str, text: str) -> str:
+def settle_toggle(tool: str, text: str,
+                  names_a_level: bool = False) -> str:
     """A toggle the sentence contradicts, resolved to the side it names.
 
     Returns ``tool`` unchanged for anything that is not a toggle, for a
     sentence that takes a verb back, for one that actually says "toggle", and
     for one that names both sides or neither.
+
+    ``names_a_level`` is `slot_match.level_from(text) is not None`, passed in
+    rather than imported. See the level tier below.
     """
     pair = TOGGLES.get(tool)
     if pair is None or not text:
@@ -404,6 +408,16 @@ def settle_toggle(tool: str, text: str) -> str:
     on, off = pair
     on_hit = _hits(VOCABULARY[on], tokens, text)
     off_hit = _hits(VOCABULARY[off], tokens, text)
+    if not on_hit and not off_hit:
+        # Both sides silent is where the model answers `flip`, and it is very
+        # often a verb speech-to-text broke rather than a verb nobody said:
+        # "כבהאת הנורה" lost its space, "קבי אור" and "תדליכי" swapped ק for כ.
+        # Read again with those two tolerances - see `_hits_noisy` for why they
+        # are affordable here and nowhere else. Tried only when the strict
+        # reader is silent on *both* sides, so a side it did find can never be
+        # tied by a noisy match on the other. 47 agree, 0 disagree.
+        on_hit = _hits_noisy(VOCABULARY[on], text)
+        off_hit = _hits_noisy(VOCABULARY[off], text)
     if on_hit and not off_hit:
         return on
     if off_hit and not on_hit:
@@ -424,6 +438,22 @@ def settle_toggle(tool: str, text: str) -> str:
     #
     # It could not ship before `light_toggle` gained טוגל: without it, "תעשה
     # טוגל לאור" reached this tier and 50 genuine toggles were turned on.
+    # A level is a turn-on, because nothing else can hold one. "אור בחדר
+    # שינה בעשרים וחמישה אחוז" is a brightness and `light.toggle` takes no
+    # brightness; the model answers `flip` because it read a light and no verb,
+    # and the percentage was there all along. Same for a fan's speed.
+    #
+    # An *upward* step counts too and a downward one does not, and the
+    # asymmetry is Hebrew rather than fitting. Raising a thing that is off
+    # turns it on - "תחזק את האורות הרבה יותר", "אור בסלון יותר" - but
+    # "להוריד" is the ordinary way to say switch off: "תוריד את התקע" takes the
+    # plug down, it does not dim it. Measured per clause where both sides are
+    # silent, level alone reads 467/297/0 agree and **0 disagree** on
+    # light/fan/switch; adding the upward step makes it 868/297/21 and still
+    # **0**; adding the downward step as well breaks 74 of them, every one a
+    # "להוריד" whose gold is off.
+    if names_a_level or (which_way(text) or 0) > 0:
+        return on
     if _hits(list(_DO_VERBS), tokens, text):
         return on
     return tool
@@ -466,6 +496,44 @@ DISCRIMINATING: Final[dict[str, tuple[str, ...]]] = {
                      "ללחוץ", "לחיצה"),
 }
 
+#: The second tier, read only when the table above is silent - which it is on
+#: 966 of the 1,621 routine clauses, because two thirds of them never say the
+#: noun at all.
+#:
+#: **Order is the rule here**, not an accident of the literal: the first entry
+#: whose words appear decides, and it is `scene_activate` on purpose. A
+#: sentence that says both "מצב" and "תפעיל" - "תפעיל מצב שבת" - is a scene,
+#: and reading the verb first would make it a script.
+#:
+#: `מצב` is what an Israeli calls a scene when they do not call it a scene:
+#: it appears on **222 of the 234** silent scene clauses and is nearly absent
+#: from the rest. The run-verbs are the mirror - a script is a thing you
+#: *activate*, a scene is a thing you *switch to* - and they carry 194 more.
+#:
+#: These are markers, not names. The corpus's silent macro clauses also
+#: correlate strongly with הביתה, יציאה, השקיה and ניקיון, and those are left
+#: out deliberately: they are the names of the scripts this corpus happens to
+#: generate, and a table of them would score well here and know nothing about
+#: a real house.
+#:
+#: Measured per clause over the whole corpus, as a ladder on top of the strict
+#: table and its noisy re-read: 655 agree and 0 disagree becomes **1,074 agree
+#: and 4 disagree**, with silence down from 966 to 543. All four say the
+#: strict noun through injected speech noise - "האותומציה", "העוטומציה",
+#: "האוטומזיה", "שצנת" - so the tier that should have caught them is the one
+#: above, not this one.
+DISCRIMINATING_WEAK: Final[dict[str, tuple[str, ...]]] = {
+    "scene_activate": ("מצב", "למצב", "המצב"),
+    "script_run": ("תפעיל", "תפעילי", "להפעיל", "הפעל", "הפעילי",
+                   "תעשה", "תעשי", "לעשות"),
+}
+
+#: A run-verb needs something to run. All 194 corpus clauses this tier reads as
+#: a script name one - "תעשה חזרה הביתה", "תפעיל יציאה מהבית", "להפעיל השקיה" -
+#: and "תפעיל את זה" names nothing at all, so the model's own answer is the
+#: better one. **Not one of the 194 says any of these**, so the guard is free.
+_NAMES_NOTHING: Final[tuple[str, ...]] = ("זה", "זאת", "אותו", "אותה")
+
 
 def settle_action(tool: str, siblings: list[str], text: str) -> str:
     """The one behaviour of ``siblings`` the sentence names, or ``tool``.
@@ -489,6 +557,22 @@ def settle_action(tool: str, siblings: list[str], text: str) -> str:
     named = [name for name in siblings
              if _hits(list(DISCRIMINATING[name]) if name in DISCRIMINATING
                       else TOOL_HINTS.get(name, []), tokens, text)]
+    if not named:
+        # The same nouns, read through the noise speech-to-text puts in them.
+        # Only for siblings the table covers: `TOOL_HINTS` is the router's own
+        # list and is long and generic, and reading *it* loosely is what the
+        # note above `tool_router._FINALS` measured and rejected.
+        named = [name for name in siblings
+                 if name in DISCRIMINATING
+                 and _hits_noisy(list(DISCRIMINATING[name]), text)]
+    if not named and not _hits(list(_NAMES_NOTHING), tokens, text):
+        # And the markers that are not nouns. Ordered by the table rather than
+        # by `siblings`, because the order is the rule - see
+        # :data:`DISCRIMINATING_WEAK`.
+        for name, words in DISCRIMINATING_WEAK.items():
+            if name in siblings and _hits(list(words), tokens, text):
+                named = [name]
+                break
     if not named:
         return tool
     if len(named) > 1:
@@ -547,66 +631,114 @@ def which_way(text: str) -> int | None:
 #: one being "טנמיך עוד קצת", where injected speech noise corrupted the
 #: direction verb itself, which is the same single exception the sign rule
 #: above already ships with.
-_STEP_SIZES: Final[tuple[tuple[tuple[str, ...], int], ...]] = (
-    (("בהרבה", "משמעותית", "הרבה"), 4),
-    (("חזק",), 3),
-    (("קצת", "טיפה", "שמץ", "מעט"), 1),
-)
+_STEP_SMALL: Final = ("קצת", "טיפה", "שמץ", "מעט")
+_STEP_BIG: Final = ("בהרבה", "משמעותית", "הרבה")
+_STEP_LOUD: Final = ("חזק",)
+_STEP_MORE: Final = ("עוד",)
+
+#: One scale per slot: ``(small, small with עוד, big, חזק, unmarked)``.
+#:
+#: A degree and a percent are not the same size, which is why this is a table
+#: and not a constant. Read off gold the same way the temperature row always
+#: was - every clause whose call carries the slot and whose sentence names no
+#: number at all, grouped by exactly which adverbs are present. Every cell
+#: below is unanimous in the corpus except the two noted:
+#:
+#:     temperature_step      קצת 1 x122   הרבה 4 x96    חזק 3 x31   none 2 x156
+#:     brightness_step_pct   קצת 10 x108  הרבה 35 x122  חזק 30 x29  none 20 x168
+#:     volume_step_pct       קצת 10 x45   הרבה 35 x61   חזק  see below
+#:
+#: Three readings follow from the grouping and none of them were guessed:
+#:
+#: * **עוד raises a small step and only a small one.** "עוד קצת" is 15 on both
+#:   percent slots, 29 and 13 clauses, unanimous - while "עוד" alone is the
+#:   unmarked 20 and "עוד קצת" on a thermostat is still 1.
+#: * **The smaller adverb wins a compound.** "טיפה יותר חזק" is 10, not 30:
+#:   קצת+חזק, טיפה+חזק and שמץ+חזק are 26 clauses and every one takes the
+#:   small value. So small is tested first, then big, then חזק.
+#: * **חזק sizes a light and not a speaker.** On brightness it is 30 on all 29
+#:   clauses; on volume it is 30 on twenty and 20 on sixteen, which is a coin
+#:   flip and not a rule. `None` there means *stay silent* rather than fall
+#:   through to the unmarked value - falling through turns those sixteen into
+#:   disagreements, and the model's own answer is the better bet.
+#:
+#: Measured as a rule, per clause, over train, dev and test:
+#:
+#:     temperature_step      389 agree,  1 disagree
+#:     brightness_step_pct   572 agree,  6 disagree
+#:     volume_step_pct       311 agree,  2 disagree
+#:
+#: The nine are all injected speech noise inside the adverb itself - "קזת",
+#: "הרוה פחות", "משמעוטית", "העבודהמשמעותית" - the same single exception class
+#: the sign rule has always carried.
+_STEP_SCALE: Final[dict[str, tuple[int, int, int, int | None, int]]] = {
+    "temperature_step":    (1, 1, 4, 3, 2),
+    "brightness_step_pct": (10, 15, 35, 30, 20),
+    "volume_step_pct":     (10, 15, 35, None, 20),
+}
 
 
-#: What a directional verb means when the clause sizes it with nothing at all.
-#: "תגביר את הקירור" is two degrees up, and it is the *unmarked* case rather
-#: than a tier of `_STEP_SIZES` - the adverbs above modify it in both
-#: directions. Measured per clause over the corpus, on climate calls that set
-#: a temperature, take a direction verb, name no number and no size word:
-#: **186 agree, 4 disagree**, and the four all say `הרבה` or `משמעותית`
-#: through the injected noise - "הרוה פחות", "משמאותית", "הרבהיותר" - where a
-#: readable adverb would have sized it at four.
-_DEFAULT_STEP: Final[int] = 2
+def step_size(text: str, slot: str = "temperature_step") -> int | None:
+    """How big a step this clause asks for on ``slot``, or ``None``.
 
+    ``None`` is silence and it has two causes, deliberately not distinguished
+    by the caller: the clause sizes nothing at all, or it sizes it with a word
+    this slot has no unanimous reading for. See :data:`_STEP_SCALE`.
 
-def step_size(text: str) -> int | None:
-    """How many steps the clause asks for in words, or ``None``."""
-    if not text:
+    The unmarked value is included - a verb that moves the thing is a step even
+    with no adverb behind it - and is guarded on the *verb*, not on
+    :func:`which_way`, which also answers to a bare יותר or a bare חלש. Those
+    modify a step; they do not make one.
+    """
+    scale = _STEP_SCALE.get(slot)
+    if not text or scale is None:
         return None
+    small, small_more, big, loud, unmarked = scale
     tokens = _tokens(text)
-    for words, size in _STEP_SIZES:
-        if _hits(list(words), tokens, text):
-            return size
+    if _hits(list(_STEP_SMALL), tokens, text):
+        return small_more if _hits(list(_STEP_MORE), tokens, text) else small
+    if _hits(list(_STEP_BIG), tokens, text):
+        return big
+    if _hits(list(_STEP_LOUD), tokens, text):
+        return loud
+    if _hits(list(_STEP_VERBS), tokens, text):
+        return unmarked
     return None
 
 
 def settle_steps(arguments: dict[str, Any], text: str,
-                 may_fill: bool = False) -> dict[str, Any]:
+                 may_fill: tuple[str, ...] = ()) -> dict[str, Any]:
     """``arguments`` with the sign of any relative argument corrected.
 
     Nothing is removed and no magnitude the model emitted changes: the
     sentence was measured to settle which way a step points and not whether
     there is one.
 
-    ``may_fill`` is the caller's answer to "does this clause name no number at
-    all" - `hebrew_numbers.numbers_in` and `slot_match.temperature_from`,
-    passed in rather than imported, the same arrangement as elsewhere in this
-    module. With it, and only with it, a **temperature** step the model left
-    out is supplied from the words: see :data:`_STEP_SIZES`, and
-    :data:`_DEFAULT_STEP` for the verb that names a direction and no size at
-    all. The guard is what
-    the module header's rejection turned on - 106 corpus calls carry an
-    absolute value under a directional verb, "תוריד את המזגן לבערך 25" lowers
-    it *to* 25 - and every one of those names a number.
+    ``may_fill`` names the step slots the caller has cleared for filling - the
+    ones this tool declares and whose sentence names no number at all.
+    `hebrew_numbers.numbers_in` and `slot_match.unsupported` are what answer
+    that, passed in rather than imported, the same arrangement as elsewhere in
+    this module. For each of them a step the model left out is supplied from
+    the words: see :data:`_STEP_SCALE`.
+
+    The guard is what the module header's rejection turned on - 106 corpus
+    calls carry an absolute value under a directional verb, "תוריד את המזגן
+    לבערך 25" lowers it *to* 25 - and every one of those names a number.
+
+    It was a bool meaning `temperature_step` until the other two slots were
+    measured. They fail the same way and for the same reason: "תגביר את
+    הווליום קצת" is a step the model answers as a switch-on with no argument
+    at all, and there is nothing about a degree that made it the only slot
+    worth reading off the sentence.
     """
-    if (may_fill and not arguments.get("temperature_step")
-            and (way := which_way(text)) is not None):
-        size = step_size(text)
-        if size is None and _hits(list(_STEP_VERBS), _tokens(text), text):
-            # Sized by nothing, but a verb that moves the thermostat is still
-            # a step and the call has to carry one. Guarded on the *verb*
-            # rather than on `which_way`, which also answers to a bare יותר or
-            # a bare חלש: those modify a step and do not make one.
-            size = _DEFAULT_STEP
-        if size is not None:
-            arguments = dict(arguments)
-            arguments["temperature_step"] = size if way > 0 else -size
+    if may_fill and (way := which_way(text)) is not None:
+        for slot in may_fill:
+            if arguments.get(slot):
+                continue
+            size = step_size(text, slot)
+            if size is not None:
+                arguments = dict(arguments)
+                arguments[slot] = size if way > 0 else -size
     relative = {k: v for k, v in arguments.items()
                 if k in RELATIVE and isinstance(v, (int, float))
                 and not isinstance(v, bool) and v}
@@ -1035,8 +1167,25 @@ def settle_climate(tool: str, arguments: dict[str, Any], text: str,
     # to its adverb by the injected speech noise, which is the exception this
     # project names rather than the rule failing.
     tokens = _tokens(text)
-    to_set = (any(arguments.get(key) for key in _CLIMATE_TEMP_ARGS)
-              and (said_a_number or _hits(list(_STEP_VERBS), tokens, text)))
+    # A step the clause sizes in words is a thermostat setting, even when the
+    # model attached no number to hang it on. "תקרר את המזגן במטבח קצת", "חם
+    # מדי, תנמיך", "קר מדי, תחמם קצת יותר" - the model answers these with a
+    # mode, an off, a fan speed, anything but the behaviour that can hold a
+    # step, and `settle_steps` runs *after* this and so has nothing to fill.
+    # It is the same shape as the level tier in `settle_toggle`: the slot the
+    # sentence names settles the behaviour, and then the behaviour takes it.
+    #
+    # Excluded where the clause names a fan speed, and that exclusion is the
+    # whole rule: "שים את הפן של המזגן על חזק" is a `fan_mode`, and חזק is
+    # also how `_STEP_SCALE` sizes a step. Without the guard 72 fan rows read
+    # as temperatures. With it, measured per clause over the whole corpus on
+    # every climate call: **1,318 agree, 0 disagree**.
+    sized_step = (named_mode != "fan_mode"
+                  and which_way(text) is not None
+                  and step_size(text) is not None)
+    to_set = (sized_step
+              or (any(arguments.get(key) for key in _CLIMATE_TEMP_ARGS)
+                  and (said_a_number or _hits(list(_STEP_VERBS), tokens, text))))
     if (named_mode and tool in _NOT_YET_A_MODE and not to_set
             and not _hits(list(_CLIMATE_SWITCHED), tokens, text)):
         return ("climate_set_fan_mode" if named_mode == "fan_mode"
@@ -1048,7 +1197,7 @@ def settle_climate(tool: str, arguments: dict[str, Any], text: str,
     # Truthiness rather than presence, as `settle_timer` reads a duration: a
     # `temperature_step` of zero is a no-op and not evidence of anything, and
     # a `temperature` cannot be zero because the schema floors it at 16.
-    if any(arguments.get(key) for key in _CLIMATE_TEMP_ARGS):
+    if sized_step or any(arguments.get(key) for key in _CLIMATE_TEMP_ARGS):
         return "climate_set_temperature"
     return tool
 
@@ -1089,6 +1238,11 @@ _ROTATES: Final[tuple[str, ...]] = (
 _STOPS: Final[tuple[str, ...]] = (
     "עצור", "עצרי", "תעצור", "תעצרי", "שתעצור", "שתעצרי", "לעצור",
     "הפסק", "הפסיקי", "תפסיק", "תפסיקי", "שתפסיק", "שתפסיקי", "להפסיק",
+    # "די עם את הוילונות" - enough with the curtains. 33 cover and valve
+    # clauses say it and all 33 are a stop. It is deliberately absent from
+    # `_MEDIA_STOPS` below: on a speaker the same word is a **pause**, 111
+    # clauses out of 111, and the two families disagree about it completely.
+    "די",
 )
 #: Not the stop verbs: :data:`_STOPS` appears on ``media_pause`` as often as
 #: on ``media_stop`` - "תעצור את המוזיקה" is a pause - so the verb settles
@@ -1102,6 +1256,24 @@ _MEDIA_STOPS: Final[tuple[str, ...]] = (
 #: rule can never reach a sibling it was not measured against - ``media_stop``
 #: and ``media_next_track`` are both ``media_control`` and only the first pair
 #: is in evidence here.
+#: A message to a phone against an announcement over the speakers. Both tools
+#: take one argument and it is the same one, so the model has nothing to go on
+#: but the verb - and it picks wrong, or refuses, on 14 of the benchmark's
+#: `notify_send` rows.
+#:
+#: The verbs separate them completely and in both directions: **199 agree, 0
+#: disagree** for the notification words and **102 and 0** for the broadcast
+#: ones, and **not one corpus clause says both**, so the order they are read in
+#: is free rather than load-bearing.
+_TO_A_PHONE: Final[tuple[str, ...]] = (
+    "הודעה", "תעדכן", "תעדכני", "לעדכן", "תשלח", "לשלוח", "שלח",
+    "שתשלח", "שתעדכן",
+)
+_OVER_THE_SPEAKERS: Final[tuple[str, ...]] = (
+    "תכריז", "להכריז", "הכרז", "תכריזי", "תשדר", "תשדרי", "לשדר",
+    "ברמקולים", "רמקולים", "הכרזה",
+)
+
 _NAMES_ITS_BEHAVIOUR: Final[tuple[tuple[frozenset[str], tuple[str, ...], str], ...]] = (
     (frozenset(("cover_open", "cover_close", "cover_set_position")),
      _STOPS, "cover_stop"),
@@ -1111,12 +1283,29 @@ _NAMES_ITS_BEHAVIOUR: Final[tuple[tuple[frozenset[str], tuple[str, ...], str], .
      _ROTATES, "fan_oscillate"),
     (frozenset(("media_pause", "media_play")),
      _MEDIA_STOPS, "media_stop"),
+    (frozenset(("notify_send", "broadcast")), _TO_A_PHONE, "notify_send"),
+    (frozenset(("notify_send", "broadcast")), _OVER_THE_SPEAKERS, "broadcast"),
 )
 
-#: Cover and valve behaviours a named percentage turns into a placement.
-#: ``cover_stop`` is here too, and the stop rule above runs first and wins, so
-#: the only way this reaches a stop is a clause naming a percentage and no
-#: stop verb - which is a placement the model called a stop.
+#: A placement that has nothing to place. Read only when
+#: the clause names no level at all: over the corpus, **684 of 684** cover and
+#: valve clauses that name one are gold `place`, and of the 5,116 that name
+#: none only 21 are - so a `cover_set_position` on a silent clause is the model
+#: reaching for the behaviour rather than the sentence asking for it.
+#:
+#: The verb is what it is handed back to, and `settle` is asked from both ends
+#: so that a clause whose verbs point two ways stays silent. Measured per
+#: clause: **4,558 agree, 0 disagree**, 547 silent. The stop half of that is
+#: `_NAMES_ITS_BEHAVIOUR` above, which runs first and now knows `די`.
+_PLACED_FROM: Final[dict[str, tuple[str, str]]] = {
+    "cover_set_position": ("cover_open", "cover_close"),
+    "valve_set_position": ("valve_open", "valve_close"),
+}
+
+#: And the other way: cover and valve behaviours a named percentage turns into
+#: a placement. ``cover_stop`` is here too, and the stop rule above runs first
+#: and wins, so the only way this reaches a stop is a clause naming a
+#: percentage and no stop verb - which is a placement the model called a stop.
 _PLACEABLE: Final[dict[str, str]] = {
     "cover_open": "cover_set_position", "cover_close": "cover_set_position",
     "cover_stop": "cover_set_position",
@@ -1250,6 +1439,13 @@ def settle_named(behaviour: str, text: str,
         return "light_turn_on"
     if at_a_position and behaviour in _PLACEABLE:
         return _PLACEABLE[behaviour]
+    if not at_a_position and behaviour in _PLACED_FROM:
+        # 6. and a placement with nothing to place is not one. See
+        # :data:`_PLACED_FROM`.
+        opened, closed = _PLACED_FROM[behaviour]
+        settled = settle(opened, text)
+        if settled == settle(closed, text):
+            return settled
     return behaviour
 
 
@@ -1332,9 +1528,20 @@ _M_NEXT: Final = ("הבא", "הבאה", "דלג", "תדלג", "דלגי", "תד�
 _M_BACK: Final = ("הקודם", "הקודמת", "אחורה", "לאחור", "חזור", "תחזור",
                   "חזרי", "תחזרי", "קודם")
 _M_MUTE: Final = ("השתק", "תשתיק", "השתיקי", "תשתיקי", "מיוט", "השתקה",
-                  "בשקט", "תחזיר את הקול", "להחזיר את הקול", "תבטל השתקה",
+                  # 38 corpus clauses say "תשים על שקט" and all 38 are a mute.
+                  # `בשקט` does not reach it: the preposition is its own token.
+                  # The phrase means something else entirely one tool over - 53
+                  # `vacuum_control` clauses say it for the silent suction mode -
+                  # which is why it lives in this table and not a shared one.
+                  "בשקט", "על שקט", "תחזיר את הקול", "להחזיר את הקול", "תבטל השתקה",
                   "לבטל השתקה", "תוריד מיוט")
-_M_INPUT: Final = ("ערוץ", "מקור", "ספוטיפיי", "יוטיוב", "אייראפליי",
+# `רדיו` is 41 media_control clauses and every one is a source. It is on 150
+# `music_play` rows too, where it is *what* to play rather than where from -
+# and none of those reaches this function, because none is a plain request.
+# `תחליף` is 86 clauses, all source; it also appears on light, switch and fan
+# rows, where it means swap the bulb and this table is never consulted.
+_M_INPUT: Final = ("ערוץ", "מקור", "רדיו", "תחליף", "תחליפי", "להחליף",
+                   "ספוטיפיי", "יוטיוב", "אייראפליי",
                    "בלוטות'", "בלוטות")
 #: A direction verb is a volume on its own; the nouns need a level beside them.
 _M_VOLUME_VERB: Final = ("תגביר", "תנמיך", "הגבר", "נמיך", "תחליש",
@@ -1386,7 +1593,8 @@ MEDIA_BEHAVIOURS: Final[frozenset[str]] = frozenset((
 
 
 def settle_media(tool: str, text: str, names_a_level: bool,
-                 plain_request: bool = False) -> str:
+                 plain_request: bool = False,
+                 names_a_value: bool = False) -> str:
     """Which of the eight speaker behaviours the sentence names.
 
     ``names_a_level`` is the caller's answer to "does the sentence carry a
@@ -1420,6 +1628,9 @@ def settle_media(tool: str, text: str, names_a_level: bool,
     def said(words: tuple[str, ...]) -> int:
         return _hits(list(words), tokens, text)
 
+    sets_a_level = (which_way(text) is not None
+                    and step_size(text, "volume_step_pct") is not None)
+
     if said(_M_NEXT):
         found = "media_next_track"
     elif said(_M_BACK):
@@ -1428,7 +1639,20 @@ def settle_media(tool: str, text: str, names_a_level: bool,
         found = "media_mute"
     elif said(_M_INPUT):
         found = "media_select_source"
-    elif said(_M_VOLUME_VERB) or (said(_M_VOLUME_NOUN) and names_a_level):
+    elif (said(_M_VOLUME_VERB) or names_a_value or sets_a_level
+            or (said(_M_VOLUME_NOUN) and names_a_level)):
+        # A value or a sized step is a volume and there is nothing else on a
+        # speaker it could be - "שים את הרמקול על שלושים אחוז", "קצת פחות יותר
+        # חלש", "טרים בהרבה את הווליום" - and the model answers all three with
+        # a transport verb. The noun is no longer required, which is the point:
+        # two of those three name no volume noun at all.
+        #
+        # `_M_MUTE` is tested above and that ordering is the rule, not an
+        # accident: "תוריד מיוט" is an *un*mute and its verb is a downward
+        # step, so reading the step first turns 31 unmutes into volume calls.
+        # Behind the mute branch, measured per clause over the whole corpus on
+        # every media clause: **721 agree, 1 disagree**, the one being "מיות" -
+        # speech noise inside the word the branch above matches on.
         found = "media_set_volume"
     elif said(_M_STOP):
         found = "media_stop"

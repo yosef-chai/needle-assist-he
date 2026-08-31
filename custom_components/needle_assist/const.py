@@ -442,6 +442,20 @@ FALLBACK_DOMAINS: Final[dict[str, tuple[tuple[str, str, str], ...]]] = {
     "switch_toggle": (
         ("humidifier", "humidifier", "toggle"),
     ),
+    # A robot mower is a robot vacuum as far as Hebrew is concerned - it is
+    # sent out, it comes back, it is paused - and `lawn_mower` mirrors
+    # `vacuum`'s three services exactly under different names. Without this,
+    # `HassLawnMowerStartMowing` and `HassLawnMowerDock` were the only two of
+    # Home Assistant's own intents this integration could not reach at all.
+    "vacuum_start": (("lawn_mower", "lawn_mower", "start_mowing"),),
+    "vacuum_return_to_base": (("lawn_mower", "lawn_mower", "dock"),),
+    "vacuum_pause": (("lawn_mower", "lawn_mower", "pause"),),
+    # "תעלה את הדוד ל-60". The boiler already switches on and off through
+    # `switch_control` above; its temperature had nowhere to go, and
+    # `water_heater.set_temperature` takes the same `temperature` argument
+    # under the same name.
+    "climate_set_temperature": (
+        ("water_heater", "water_heater", "set_temperature"),),
     "cover_open": (("valve", "valve", "open_valve"),),
     "cover_close": (("valve", "valve", "close_valve"),),
     "cover_stop": (("valve", "valve", "stop_valve"),),
@@ -595,6 +609,17 @@ ROUTINE_SIBLING: Final = {
 #: `fan_speed` on the vacuum instead. The step slots are deliberately absent:
 #: the corpus says those as idioms and never as a percentage, measured at
 #: zero rows out of 779.
+#: Which absolute slot has to be silent before a relative one may be filled
+#: from the words. `direction.settle_steps` supplies a step the model left out,
+#: and the guard against doing that on "תוריד את המזגן ל-25" is that the
+#: sentence names no value for the thing being stepped - which
+#: `slot_match.unsupported` answers, for the slot named here.
+STEP_SOURCE: Final[dict[str, str]] = {
+    "temperature_step": "temperature",
+    "brightness_step_pct": "brightness_pct",
+    "volume_step_pct": "volume_pct",
+}
+
 NUMBER_SLOT: Final[dict[str, str]] = {
     "light_turn_on": "brightness_pct",
     "media_set_volume": "volume_pct",

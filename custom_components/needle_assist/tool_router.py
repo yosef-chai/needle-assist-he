@@ -50,9 +50,10 @@ import json
 import re
 from typing import Any, Final
 
+from . import hebrew_numbers
 from .area_map import AREA_ALIASES
 from .const import ACTIONS, CALL_OF
-from .hebrew_text import PhraseIndex, normalise
+from .hebrew_text import PhraseIndex, _distance, normalise
 
 MAX_TOOLS: Final = 5
 _NOUN_WEIGHT: Final = 3
@@ -218,6 +219,18 @@ FAMILY_NOUNS: Final[dict[str, list[str]]] = {
     # noun and nothing else, which is 33 of the 40 rows where the sentence and
     # the gold disagree about which family was named.
     "vacuum": ["שואב", "רובוט", "רומבה", "שואבת", "ווקום", "שיעשה סיבוב",
+               # A robot mower rides this family to reach
+               # `FALLBACK_DOMAINS["vacuum_start"]`, and without its own
+               # noun it could not: "תפעיל את המכסחת" scored nothing for
+               # vacuum and went to the automations. `דשא` is
+               # deliberately absent - it is the lawn, an area in this
+               # project's own room lexicon, on 398 corpus rows.
+               #
+               # Neither form appears anywhere in the corpus or the
+               # frozen benchmark, so this cannot move a measured row;
+               # it is coverage for a device the generator does not
+               # simulate, exactly like `מאדה` on the switch family.
+               "מכסחת", "מכסחה", "מכסחת דשא", "רובוט דשא",
                "לתחנה", "לעמדה", "לבסיס", "לעגינה"],
     # "יותר חזק" / "יותר חלש" are the elliptical volume commands ("טיפה יותר
     # חזק בסלון") - they name no device at all, so without them the utterance
@@ -816,6 +829,77 @@ def _hits(keywords: list[str], toks: set[str], query: str) -> int:
     return n
 
 
+# ק and כ are one sound in Israeli Hebrew and speech-to-text swaps them freely:
+# the corpus carries קבי for כבי, תדליכי for תדליקי, תקבי for תכבי.
+_KAF_FOLD: Final = str.maketrans("ק", "כ")
+
+# The particles Hebrew glues to the front of a word, as
+# `hebrew_text._PREFIX_LETTERS` spells them. Only the anchored
+# reading below needs them, and only to let a match begin just after one.
+_PREFIX_CLITICS: Final = "ובהלכמש"
+
+
+def _hits_noisy(keywords: list[str], query: str) -> int:
+    """:func:`_hits` again, deaf to a lost space and to the ק/כ homophone.
+
+    **Not a replacement for `_hits` and not for the router.** Wider phonetic
+    folding was measured at the routing level and rejected - see the note above
+    `_FINALS` - because a false match there opens a blind on a sentence about
+    the weather. This is for the *settlers* in :mod:`direction`, which run after
+    the router has chosen the family and the model has answered: the only thing
+    left to decide is which of two directions, so a false match costs a
+    direction and cannot cost a device. That weaker consequence is what buys
+    the weaker test.
+
+    Two readings, and a keyword counts if either finds it:
+
+    ``anchored``  the query with every space removed, but the match must still
+                  begin where a word began, give or take the prefix cluster -
+                  `hebrew_text._find_despaced`'s left edge, without its right
+                  edge. Giving up the right edge is the whole point: "כבהאת"
+                  is the verb with the next word glued to it and has no
+                  boundary at its end. Three characters is enough here.
+    ``plain``     no boundary at all, four characters and up. Recovers the
+                  split "לסג ור", which no word-start rule can see because the
+                  match begins in the middle of the *following* token.
+
+    The floors are where the damage is. Unanchored at three, ``כבה`` is found
+    across the seam of "במוסך בהרבה" - the final ך folds to כ, the ב of the
+    next word follows, and seven brightenings became switch-offs. Anchored,
+    that seam is not a word start and the same three-letter key is safe.
+
+    Measured over train, dev and test on every clause where the strict reader is
+    silent on **both** sides of a toggle: anchored alone **33 agree, 0
+    disagree**, plain alone **47 and 0**, together **49 and 0**. They overlap
+    but neither contains the other, which is why both are here.
+    """
+    folded = _fold(query).translate(_KAF_FOLD)
+    flat, starts, at = [], set(), 0
+    for word in folded.split():
+        starts.add(at)
+        flat.append(word)
+        at += len(word)
+    joined = "".join(flat)
+
+    n = 0
+    for key in keywords:
+        needle = _fold(key).strip(_PUNCT).translate(_KAF_FOLD)
+        if " " in needle or len(needle) < 3:
+            continue
+        if len(needle) >= 4 and needle in joined:
+            n += 1
+            continue
+        found = joined.find(needle)
+        while found >= 0:
+            if any(found - back in starts
+                   and all(c in _PREFIX_CLITICS for c in joined[found - back:found])
+                   for back in range(4)):
+                n += 1
+                break
+            found = joined.find(needle, found + 1)
+    return n
+
+
 # Verbs exactly one family claims. ------------------------------------------
 #
 # "נקה כאן" and "דלג" name no device at all, so they scored one point for the
@@ -1015,6 +1099,15 @@ _CLOCK_WORDS: Final = frozenset(
     ))
 
 
+def _near_filler(word: str) -> bool:
+    """Is this word a one-edit misspelling of a politeness or clock word?"""
+    if len(word) < 4:
+        return False
+    return any(_distance(word, known, 1) <= 1
+               for known in _CANCEL_NOISE_FOLDED | _CLOCK_WORDS
+               if abs(len(known) - len(word)) <= 1)
+
+
 def names_a_clock(query: str) -> bool:
     """True when the whole utterance asks the local time or date.
 
@@ -1049,6 +1142,21 @@ def names_a_clock(query: str) -> bool:
     for word in rest.split():
         variants = _variants(word)
         if variants & _CANCEL_NOISE_FOLDED or variants & _CLOCK_WORDS:
+            continue
+        # A leftover word one edit from a filler is that filler. "מה השעה
+        # כרגא", "עוקיי מה השעה כרגע", "מה השעה קרגע" - five of the benchmark's
+        # datetime rows were refused outright because one letter of the
+        # politeness was wrong, and the sentence is otherwise the bare
+        # question this function exists to recognise.
+        #
+        # Safe *here* and not in the noun matching, for the reason the whole
+        # function exists: what this is guarding against is "מה השעה בניו
+        # יורק", and a city is not one edit from a word meaning "please".
+        # The set is closed and small, the floor of four keeps two- and
+        # three-letter words out, and it is measured: over the whole corpus
+        # this reads a clock on **182** genuine datetime rows against 173
+        # before, and on **zero** rows that are not one, unchanged.
+        if any(_near_filler(v) for v in variants):
             continue
         return False
     return True
@@ -1123,6 +1231,17 @@ _QUESTION: Final = tuple(re.compile(_fold(p)) for p in (
     r"\bהאם\b",                              # האם האור דולק
     r"\b[תי]?בדו?ק[יו]?\b",                  # תבדוק / בדוק / תבדקי
     r"\bכמה\b",                              # כמה מעלות בסלון
+    # "מתי הטיימר נגמר" - when does the timer end. Without it `settle_timer`
+    # never sees a question and answers by *starting* a countdown, which is
+    # four benchmark rows and the worst reading available: the household asked
+    # how long was left and got a new timer.
+    #
+    # Measured over the whole corpus: 19 clauses say it and every one is gold
+    # `timer_control{query}` - **not one row that would actuate anything**. It
+    # is also on 122 off-topic rows, "מתי נולד רמברנדט" and its siblings, and
+    # those name no device, so they score nothing, take no room bonus and are
+    # refused exactly as they were.
+    r"\bמתי\b",                              # מתי הטיימר נגמר
     # `טמפ` is the abbreviation an Israeli actually says, and Home Assistant's
     # own Hebrew suite uses it - "מה טמפ" was read as an order and answered by
     # *setting* a temperature, which is the failure this whole block exists to
@@ -1184,9 +1303,95 @@ _QUESTION: Final = tuple(re.compile(_fold(p)) for p in (
 ))
 
 
+#: The passive participles a device is described *by*. Not verbs: nothing is
+#: done to a window by saying it is open.
+#:
+#: The other half of this list is `slot_match.SETTING_WORDS["state"]`, which
+#: maps each of them to the state it names, plus the singular forms already in
+#: `FAMILY_VERBS["query"]`. It cannot be read from here - `slot_match` imports
+#: this module - so the three are kept in step by
+#: `test_a_state_adjective_is_not_a_verb`, which fails if any of them moves.
+_STATE_ADJECTIVES: Final[frozenset[str]] = frozenset(
+    _fold(word) for word in (
+        "דולק", "דולקת", "דולקות", "דולקים",
+        "כבוי", "כבויה", "כבויות", "כבויים", "כבוים",
+        "מופעלות", "מופעלים", "מכובות", "מכובים",
+        "פועלות", "פועלים",
+        "נעול", "נעולה",
+        "סגור", "סגורה", "סגורות", "סגורים",
+        "פתוח", "פתוחה", "פתוחות", "פתוחים",
+    ))
+
+#: Asking for a state to be *kept*. No family lists these, because they name
+#: no family - "תשאיר את האור דולק" is an order and the only thing in it that
+#: says so is the verb. They belong with the imperatives below and nowhere
+#: else: a state adjective is exactly what they take as their object, so
+#: without them every one of them reads as a question about that adjective.
+_KEEP_AS_IS: Final[tuple[str, ...]] = (
+    "תשאיר", "תשאירי", "השאר", "השאירי", "להשאיר",
+    "תשמור", "תשמרי", "שמור", "שמרי", "לשמור",
+)
+
+#: Every family's imperatives, flattened - and **without the query family**,
+#: whose "verbs" are the interrogatives and the adjectives above rather than
+#: anything anybody does to a device.
+#:
+#: ``סגור`` is in both this and `_STATE_ADJECTIVES`, and that is not a mistake
+#: to be resolved: in Hebrew it is both "close!" and "closed", spelled
+#: identically. Being in both means a clause carrying it never reaches
+#: :func:`_asks_about_a_state`, which is the safe reading - the model's own
+#: answer stands rather than the gate guessing.
+_IMPERATIVES: Final[tuple[str, ...]] = tuple(sorted(
+    {verb for family, verbs in FAMILY_VERBS.items() if family != "query"
+     for verb in verbs} | set(_KEEP_AS_IS)))
+
+
+def _asks_about_a_state(query: str) -> bool:
+    """A device described by its state, with nothing asked of it.
+
+    Hebrew forms a yes/no question with intonation and no interrogative at all,
+    and written down "החלון פתוח" is exactly a statement. `_QUESTION` looks for
+    האם, איזה, מה - and there is none - so fifteen benchmark rows reached the
+    model with the whole catalogue in front of them and came back as
+    `cover_control`, `lock_control`, `light_control`: a question about a window
+    answered by opening it.
+
+    What separates the two readings is not the interrogative, it is the
+    **verb** - or rather the absence of one. ``פתוח`` is a passive participle
+    and describes a window; ``תפתח`` is an imperative and opens it. A sentence
+    carrying the first and none of the second asks for nothing.
+
+    **The adjectives are matched on bare tokens**, and that is the rule rather
+    than an optimisation. `_tokens` strips the Hebrew clitics, and stripping the
+    ל of the infinitive ``לפתוח`` leaves ``פתוח`` - 1,051 plain orders read as
+    questions, "אתה יכול לפתוח את האורות" among them. An adjective is not
+    introduced by a preposition, so it has no business being clitic-stripped.
+
+    Measured per clause over the whole corpus: **981 agree, 1 disagree**, the
+    one being "כצי פתוח" where speech noise hid the half from the level guard.
+    80 of the 981 are clauses `_QUESTION` does not reach today.
+
+    It also fires on 58 of the 4,462 off-topic rows, and that cost is real but
+    bounded: :func:`looks_like_question` hands them the two read-only tools and
+    nothing else, so the worst of them is a state report where a refusal was
+    wanted. Nothing can be switched by one.
+    """
+    bare = {_fold(word.strip(_PUNCT)) for word in query.split()}
+    if not bare & _STATE_ADJECTIVES:
+        return False
+    if _hits(list(_IMPERATIVES), _tokens(query), query):
+        return False
+    # "חצי פתוח" is not a question about a blind, it is an instruction to put
+    # it at fifty, and nobody asks whether something is half open. Ten corpus
+    # clauses say it and all ten are `cover_control`.
+    return hebrew_numbers.percent_in(query) is None
+
+
 def looks_like_question(query: str) -> bool:
     """True when the sentence asks about state rather than changing it."""
-    return any(rx.search(normalise(query)) for rx in _QUESTION)
+    if any(rx.search(normalise(query)) for rx in _QUESTION):
+        return True
+    return _asks_about_a_state(query)
 
 
 # Which of the two read-only tools, and what it should look at. ---------------

@@ -10,7 +10,12 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from homeassistant.core import Context, HomeAssistant, ServiceCall
+from homeassistant.core import (
+    Context,
+    HomeAssistant,
+    ServiceCall,
+    SupportsResponse,
+)
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import (
@@ -242,3 +247,80 @@ async def test_a_sensor_reading_is_spoken_with_its_unit(
     assert outcome.ok
     assert "23.5" in outcome.speech
     assert "°C" in outcome.speech
+
+
+async def test_asking_about_tomorrow_reads_the_forecast_and_not_today(
+    hass: HomeAssistant
+) -> None:
+    """`get_weather` carried a `day_offset` since v11 and nothing read it, so
+    "ירד גשם מחר" was answered with today's sky - a wrong answer rather than a
+    missing one, and the sentence had said so plainly.
+
+    `supported_features: 1` is `WeatherEntityFeature.FORECAST_DAILY`, named
+    rather than imported: `weather` is not a dependency of this integration.
+    """
+    hass.states.async_set(
+        "weather.home", "sunny",
+        {"friendly_name": "מזג אוויר", "temperature": 28,
+         "supported_features": 1},
+    )
+
+    async def _forecasts(call: ServiceCall) -> dict[str, Any]:
+        return {"weather.home": {"forecast": [
+            {"condition": "sunny", "temperature": 28},
+            {"condition": "rainy", "temperature": 19},
+            {"condition": "cloudy", "temperature": 22},
+        ]}}
+
+    hass.services.async_register(
+        "weather", "get_forecasts", _forecasts,
+        supports_response=SupportsResponse.ONLY,
+    )
+
+    outcome = await _run(_executor(hass), "get_weather", {}, "ירד גשם מחר")
+    assert outcome.ok
+    # Tomorrow's row, not today's: 19 degrees and rain.
+    assert "19" in outcome.speech
+    assert "28" not in outcome.speech
+    assert "מחר" in outcome.speech
+
+    # And the day after tomorrow is the row after that.
+    outcome = await _run(_executor(hass), "get_weather", {}, "ירד גשם מחרתיים")
+    assert outcome.ok and "22" in outcome.speech
+
+    # Today still reads the entity's own state and never calls the service.
+    outcome = await _run(_executor(hass), "get_weather", {}, "מה מזג האוויר")
+    assert outcome.ok and "28" in outcome.speech
+
+
+async def test_a_forecast_that_cannot_be_had_is_said_rather_than_faked(
+    hass: HomeAssistant
+) -> None:
+    """An entity with no daily forecast answers "I don't have that" rather than
+    handing back today's sky under tomorrow's name. The same for a list that
+    does not reach the day asked for.
+    """
+    hass.states.async_set(
+        "weather.home", "sunny",
+        {"friendly_name": "מזג אוויר", "temperature": 28},
+    )
+    outcome = await _run(_executor(hass), "get_weather", {}, "ירד גשם מחר")
+    assert not outcome.ok
+
+    # Supported, but the list is shorter than the day asked for.
+    hass.states.async_set(
+        "weather.home", "sunny",
+        {"friendly_name": "מזג אוויר", "temperature": 28,
+         "supported_features": 1},
+    )
+
+    async def _one_day(call: ServiceCall) -> dict[str, Any]:
+        return {"weather.home": {"forecast": [
+            {"condition": "sunny", "temperature": 28}]}}
+
+    hass.services.async_register(
+        "weather", "get_forecasts", _one_day,
+        supports_response=SupportsResponse.ONLY,
+    )
+    outcome = await _run(_executor(hass), "get_weather", {}, "ירד גשם מחרתיים")
+    assert not outcome.ok

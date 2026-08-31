@@ -96,11 +96,42 @@ for _form in WHOLE_HOME_FORMS:
 
 # Notification openers, and the marker that starts the message itself. Israelis
 # say "tell the house THAT the food is ready" - the message begins at the ש.
+#
+# ``תשדר`` - broadcast over the speakers - was missing, and the cost was not a
+# lost benchmark row. `executor` refuses `broadcast` outright when no message
+# can be read out of the sentence, so "תשדר ברמקולים שהאוכל מוכן" announced
+# nothing at all in a real house. 35 corpus clauses say it.
 _NOTIFY_TRIGGER: Final = re.compile(
-    r"(הודעה|תודיע|תודיעי|להודיע|תעדכן|תעדכני|לעדכן|תכריז|להכריז|תגיד|תגידי)")
+    r"(הודעה|תודיע|תודיעי|להודיע|תעדכן|תעדכני|לעדכן|תכריז|להכריז|תגיד|תגידי"
+    r"|תשדר|תשדרי|לשדר)")
 _NOTIFY_TAIL: Final = re.compile(r"[:\-]\s*(?P<msg>.+)$")
+
+# The closing courtesy, with every space optional. Speech-to-text splits words
+# as readily as it glues them, and "בבק שה" left the whole courtesy inside the
+# delivered message. Written letter by letter rather than as alternatives
+# because that is the only spelling that survives a space in any position.
+# ``טודה`` is in because ט and ת are one sound and the corpus contains it.
 _POLITE_TAIL: Final = re.compile(
-    r"\s*(בבקשה|תודה|אם אפשר|רבה|בבקשה תודה)+\s*$")
+    r"(?:\s*(?:ב\s*ב\s*ק\s*ש\s*ה|[תט]\s*ו\s*ד\s*ה"
+    r"|א\s*ם\s*\s*א\s*פ\s*ש\s*ר|ר\s*ב\s*ה))+\s*$")
+
+# Hebrew's five final forms belong at the end of a word and nowhere else, so a
+# final form with a letter after it, or a plain form with none, is speech-to-text
+# noise and the other shape is what was said. This is the one place in the
+# project where the *output* is repaired rather than the input: everywhere else
+# `normalise` folds the finals away and the difference stops mattering, but a
+# notification is read by a person, and "האוכל םוכן" is what they would see.
+# Every other module may keep folding; this is not a normaliser.
+_MEDIAL_FINAL: Final = re.compile(r"([ךםןףץ])(?=[א-ת])")
+_PLAIN_AT_END: Final = re.compile(r"([כמנפצ])(?![א-ת])")
+_TO_PLAIN: Final = str.maketrans("ךםןףץ", "כמנפצ")
+_TO_FINAL: Final = str.maketrans("כמנפצ", "ךםןףץ")
+
+
+def _final_forms(text: str) -> str:
+    """Put every final form where Hebrew spelling says it goes."""
+    text = _MEDIAL_FINAL.sub(lambda m: m.group(1).translate(_TO_PLAIN), text)
+    return _PLAIN_AT_END.sub(lambda m: m.group(1).translate(_TO_FINAL), text)
 
 
 # Every room word this project knows, regardless of which house is running.
@@ -176,7 +207,7 @@ def extract_message(utterance: str) -> str | None:
         else:
             return None
 
-    body = _POLITE_TAIL.sub("", body).strip()
+    body = _final_forms(_POLITE_TAIL.sub("", body).strip())
     return body or None
 
 
@@ -909,8 +940,27 @@ def temperature_from(utterance: str) -> int | None:
     found = {int(group) for match in _TARGET_TEMP.findall(utterance)
              for group in match if group}
     if len(found) != 1:
-        # Not a digit anywhere the prepositions bind. Try the words.
-        return hebrew_numbers.degrees_in(utterance)
+        # Not a digit anywhere the prepositions bind. Try the words, and then
+        # the number that names no unit at all: half of "שים את האינוורטר
+        # בחדר ילדים על עשרים וארבע" is the preposition and the rest is the
+        # value, and `degrees_in` wants a מעלות that nobody says. Reading it
+        # takes the slot from **699 right, 4 wrong, 205 silent** to **748, 5
+        # and 155**, and the extra wrong is another "אשרים" - speech noise
+        # inside the number, which the four already there all are.
+        #
+        # It fires on **zero** of the corpus's `temperature_step` rows, which
+        # is the guard that matters: `_STEP_TEMP` above is what keeps
+        # "תוריד שתי מעלות" out, and it runs before either reading.
+        said = hebrew_numbers.degrees_in(utterance)
+        if said is not None:
+            return said
+        # A percentage is a unit too, and `_value_after_lead` cannot see it:
+        # `percent_from` is where that reading lives. Checked here rather than
+        # in the helper so `level_from` - whose whole business is percentages -
+        # keeps reaching it.
+        if percent_from(utterance) is not None:
+            return None
+        return _value_after_lead(utterance, 5, 35)
     value = found.pop()
     # Home Assistant's own `climate` selector is wider than this, but a
     # thermostat asked for 3 or for 90 is a misread number rather than an
@@ -1080,6 +1130,118 @@ def percent_from(utterance: str) -> int | None:
     unlike :func:`temperature_from` this one needs no step guard.
     """
     return hebrew_numbers.percent_in(utterance)
+
+
+#: How a value is introduced when the speaker names no unit for it. Both are
+#: prepositions of destination - "put the volume **at** twenty", "open the blind
+#: **to** seventy-five", "the air conditioner **at** twenty-four" - and Hebrew
+#: glues the second one onto the number.
+_VALUE_LEAD: Final = "על"
+
+
+def _value_after_lead(utterance: str, low: int, high: int) -> int | None:
+    """The one number in range that a destination preposition introduces.
+
+    Two of them settle nothing and neither does none, as everywhere else here.
+    The range is the caller's, because it is one of the two things standing
+    between this and reading a house number: a level is 0-100 and a thermostat
+    is 5-35, and outside those a bare number after על is not the slot.
+
+    The other is this: **a number that names its own unit is not a unitless
+    one.** This is the last reading tried and it has to yield to every reading
+    that is not a guess - "שים את התריסים על 30 אחוז" is a blind at thirty
+    percent and 30 is inside the thermostat's range, "תפעיל טיימר ל5 דקות" is
+    five minutes and 5 is inside it too. Both were read as temperatures before
+    the guard, and both are in the integration's own test suite because that is
+    where they were caught.
+    """
+    if hebrew_numbers.duration_in(utterance):
+        return None
+    words = normalise(utterance).split()
+    found: set[int] = set()
+    for value, start, _end in hebrew_numbers.numbers_in(utterance):
+        if not low <= value <= high:
+            continue
+        # The conjunction counts as the preposition: "על 20 ועל 24" names two
+        # temperatures and has to settle nothing, and without the ו stripped
+        # only the first one is seen and the clause reads as a single value.
+        if start > 0 and words[start - 1].lstrip("ו") == _VALUE_LEAD:
+            found.add(value)
+        elif (lead := words[start].lstrip("ו")).startswith("ל") and len(lead) > 1:
+            # Longer than the preposition, and that is the whole guard. It read
+            # `> 2` at first and lost every single-digit target: "תפתח את
+            # התריסים ל0" is two characters, and closing a blind by opening it
+            # to nothing is how a corpus row says it. The token here is one
+            # `hebrew_numbers` has already called a number, so ל plus one
+            # character is a number with its preposition glued on and nothing
+            # else.
+            found.add(value)
+    return found.pop() if len(found) == 1 else None
+
+
+def level_from(utterance: str) -> int | None:
+    """The level the sentence names, percent noun or not.
+
+    :func:`percent_from` requires the word אחוז, which is right for it: it
+    answers "does this sentence name a percentage" for callers that must not
+    read a temperature or a house number as one. But a level is very often said
+    without it - "את הווליום על עשרים", "תפתח את הוילונות לשבעים וחמישה" - and
+    on the five behaviours of `const.NUMBER_SLOT` there is nothing else a bare
+    number introduced that way can be. Those five are the whole gate; every
+    caller here is behind it.
+
+    Measured over train, dev and test on every clause whose gold carries one of
+    the four level slots: `percent_from` alone reads **1,645 right, 1 wrong,
+    423 silent**; with this fallback, **1,942 right, 2 wrong, 125 silent**. The
+    second wrong is "על שבעים וכמישה" - speech noise inside the compound, which
+    loses the "and five" and leaves seventy.
+
+    Two numbers introduced this way settle nothing, as everywhere else here.
+    """
+    said = percent_from(utterance)
+    return said if said is not None else _value_after_lead(utterance, 0, 100)
+
+
+#: Which day a weather question is about, as an offset from today.
+#:
+#: **Ordered longest first and read first-match-wins**, because מחרתיים
+#: contains מחר: collecting every hit and requiring exactly one - which is what
+#: every other reader in this module does - makes the day after tomorrow match
+#: two rows and settle nothing.
+#:
+#: Folded through `normalise` at build time like every other table here. Written
+#: with their final letters and compared against text that has none, מחרתיים and
+#: היום could never match at all; only מחר worked, and only because it ends in a
+#: letter that has no final form.
+_WEATHER_DAYS: Final[tuple[tuple[str, int], ...]] = tuple(
+    (normalise(word), value) for word, value in (
+        ("מחרתיים", 2), ("מחרתים", 2), ("מחר", 1),
+        ("היום", 0), ("הערב", 0), ("הלילה", 0), ("עכשיו", 0),
+    ))
+
+
+def day_offset_from(utterance: str) -> int | None:
+    """Days from today, or ``None`` when the sentence names no day.
+
+    Measured per clause over the whole corpus on every `get_weather` call:
+    **50 agree, 0 disagree, 0 silent**, and it stays quiet on all 81 clauses
+    whose gold names no day at all.
+
+    Gold only ever says today or tomorrow, so the מחרתיים row is the one
+    reading here the corpus cannot vouch for. It is kept because it is not a
+    judgement call in Hebrew and because leaving it out would make the day
+    after tomorrow read as tomorrow - a wrong answer where silence is
+    available.
+
+    Two different days settle nothing, as everywhere else in this module.
+    """
+    if not utterance:
+        return None
+    text = normalise(utterance)
+    for word, value in _WEATHER_DAYS:
+        if re.search(f"(?<![א-ת])[ובלמה]{{0,3}}{word}(?![א-ת])", text):
+            return value
+    return None
 
 
 def duration_from(utterance: str) -> dict[str, int]:

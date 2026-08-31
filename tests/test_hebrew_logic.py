@@ -1854,6 +1854,11 @@ def test_fallbacks_are_reached_by_words_the_router_knows():
         assert "cover_open" in ROUTER.select_virtual_names(f"תפתח את ה{word}")
     for word in ("מאדה", "מייבש"):
         assert "switch_turn_on" in ROUTER.select_virtual_names(f"תדליק את ה{word}")
+    # A robot mower rides the vacuum family the same way, and needed its own
+    # noun to do it: "תפעיל את המכסחת" scored nothing for vacuum and reached
+    # the automations instead, which left the lawn_mower fallback unreachable.
+    for word in ("מכסחת", "מכסחה"):
+        assert "vacuum_start" in ROUTER.select_virtual_names(f"תפעיל את ה{word}")
 
 
 # --- the "באיזה חדר" round trip --------------------------------------------
@@ -2808,19 +2813,23 @@ def test_a_step_the_model_left_out_is_taken_from_the_adverb():
     "משמאותית", "הרבהיותר" - where a readable adverb would have sized it four.
     """
     settle = DIRECTION.settle_steps
-    assert settle({}, "בגן חם מדי, תנמיך קצת", True) == {"temperature_step": -1}
-    assert settle({}, "אפשר שתגביר משמעותית את המיזוג", True) == \
+    assert settle({}, "בגן חם מדי, תנמיך קצת",
+           ("temperature_step",)) == {"temperature_step": -1}
+    assert settle({}, "אפשר שתגביר משמעותית את המיזוג", ("temperature_step",)) == \
         {"temperature_step": 4}
     # Without the caller's leave - the clause names a number - nothing is added.
-    assert settle({}, "תוריד את המזגן לבערך 25", False) == {}
+    assert settle({}, "תוריד את המזגן לבערך 25", ()) == {}
     # No adverb: the unmarked step, and its sign still comes from the verb.
-    assert settle({}, "תנמיך את המזגן", True) == {"temperature_step": -2}
-    assert settle({}, "תגביר את המזגן", True) == {"temperature_step": 2}
+    assert settle({}, "תנמיך את המזגן",
+           ("temperature_step",)) == {"temperature_step": -2}
+    assert settle({}, "תגביר את המזגן",
+           ("temperature_step",)) == {"temperature_step": 2}
     # A direction with no verb behind it sizes nothing: יותר and חלש modify a
     # step, they do not make one.
-    assert settle({}, "אני רוצה יותר", True) == {}
+    assert settle({}, "אני רוצה יותר", ("temperature_step",)) == {}
     # And a step the model did emit is still only re-signed, never resized.
-    assert settle({"temperature_step": 3}, "חם מדי, תנמיך קצת", True) == \
+    assert settle({"temperature_step": 3}, "חם מדי, תנמיך קצת",
+           ("temperature_step",)) == \
         {"temperature_step": -3}
 
 
@@ -3088,3 +3097,380 @@ def test_wait_no_takes_the_order_back_like_every_other_retraction():
         "תסגור את הנורה בסלון"
     # Nothing after the retraction leaves the sentence whole, as it always did.
     assert after("כאילו אה רגע לא בבקשה תודה") == "כאילו אה רגע לא בבקשה תודה"
+
+def test_broadcasting_over_the_speakers_is_a_notification_verb():
+    """`תשדר` was missing from the notification openers, and the cost was not a
+    lost benchmark row: `executor.execute` refuses `broadcast` outright when no
+    message can be read out of the sentence, so "תשדר ברמקולים שהאוכל מוכן"
+    announced nothing at all. 35 corpus clauses say it.
+
+    Over every notify and broadcast clause, `extract_message` read 357 right
+    and 14 wrong before this and its two companions below; after, **403 and
+    7**, and all seven are noise inside the message body itself.
+    """
+    read = SLOT.extract_message
+    assert read("תשדר ברמקולים שהאוכל מוכן") == "האוכל מוכן"
+    assert read("תשמעי, יאללה תשדר ברמקולים שתרדו למטה תודה") == "תרדו למטה"
+    # The openers that always worked, unchanged.
+    assert read("תודיע בבית שהאוכל מוכן") == "האוכל מוכן"
+    # No trigger at all is still no message, which the executor reads as
+    # "do not send" rather than as an empty notification.
+    assert read("תדליק את האור בסלון") is None
+
+
+def test_a_final_letter_belongs_at_the_end_of_a_word_and_nowhere_else():
+    """The one place in the project where the *output* is repaired instead of
+    the input. Everywhere else `normalise` folds the five final forms away and
+    the difference stops mattering; a notification is read by a person, and
+    "האוכל םוכן" is what they would have seen.
+
+    Both directions, because speech-to-text produces both: a final form with a
+    letter after it, and a plain form with none.
+    """
+    read = SLOT.extract_message
+    assert read("תכריז בכל הבית שהאוכל םוכן") == "האוכל מוכן"
+    assert read("תודיע לכולם שהאוכל מוכנ") == "האוכל מוכן"
+    # And the courtesy comes off even with a space dropped into it.
+    assert read("תכריז בכל הבית שהכביסה מוכנה בבק שה") == "הכביסה מוכנה"
+    assert read("תעדכן את כולם שהאוכל מוכן טודה") == "האוכל מוכן"
+
+
+def test_a_broken_verb_still_names_its_direction():
+    """`_hits_noisy`, and the reason it is not `_hits`.
+
+    "כבהאת הנורה" lost a space and "קבי אור" swapped ק for כ - the same sound -
+    so neither side of the toggle was found and the model's `flip` stood. This
+    reads again with the boundaries given up, which is affordable only because
+    the router has already chosen the family: a false match here costs a
+    direction and cannot cost a device.
+
+    Measured per clause where the strict reader is silent on both sides:
+    **49 agree, 0 disagree**.
+    """
+    settle = DIRECTION.settle_toggle
+    assert settle("light_toggle", "כבהאת הנורה בשרותים") == "light_turn_off"
+    assert settle("light_toggle", "קבי אור באמבטייה") == "light_turn_off"
+    assert settle("switch_toggle", "תדליכ את המפסק במבואה") == "switch_turn_on"
+    # A real toggle is still a toggle.
+    assert settle("light_toggle", "תהפוך את המצב") == "light_toggle"
+
+
+def test_a_level_is_a_turn_on_because_nothing_else_can_hold_one():
+    """"אור בחדר שינה בעשרים וחמישה אחוז" is a brightness, and `light.toggle`
+    takes no brightness. The model answers `flip` because it read a light and
+    no verb; the percentage was in the sentence all along.
+
+    An upward step counts and a downward one does not, and the asymmetry is
+    Hebrew rather than fitting: raising a thing that is off turns it on, while
+    "תוריד את התקע" takes the plug down and means switch it off. Measured per
+    clause where both sides are silent - level alone **467/297/0 agree and 0
+    disagree** on light, fan and switch; with the upward step **868/297/21 and
+    still 0**; with the downward step as well, 74 break.
+    """
+    settle = DIRECTION.settle_toggle
+    assert settle("light_toggle", "אור בחדר שינה", names_a_level=True) == \
+        "light_turn_on"
+    assert settle("light_toggle", "תחזק את האורות במטבח הרבה יותר") == \
+        "light_turn_on"
+    # Down, with no level: the model's answer stands.
+    assert settle("switch_toggle", "תוריד את התקע בחדר אוכל") == "switch_toggle"
+
+
+def test_a_value_needs_no_unit_when_only_one_slot_could_hold_it():
+    """"את הווליום על עשרים", "תפתח את הוילונות לשבעים וחמישה", "שים את המזגן
+    על עשרים וארבע" - Hebrew introduces a target with a preposition and very
+    often names no unit at all, and every reader here wanted one.
+
+    On the five behaviours of `const.NUMBER_SLOT` and on a thermostat there is
+    nothing else a bare number in range can be. Measured per clause over the
+    corpus: the level slots go from **1,645 right, 1 wrong, 423 silent** to
+    **1,942, 2 and 125**; the temperature from **699, 4 and 205** to **748, 5
+    and 155**, firing on none of the corpus's `temperature_step` rows.
+    """
+    assert SLOT.level_from("את הווליום בחדר הילדים על עשרים") == 20
+    assert SLOT.level_from("תפתח את הוילונות לשבעים וחמישה") == 75
+    assert SLOT.temperature_from("שים את אינוורטר על עשרים וארבע") == 24
+    # Two of them settle nothing, and the conjunction counts as the
+    # preposition - without the ו stripped, only the first would be seen.
+    assert SLOT.temperature_from("על 20 ועל 24") is None
+    # A number wearing another slot's unit is not this one, and this reading is
+    # the last one tried precisely so that it yields.
+    assert SLOT.temperature_from("שים את התריסים על 30 אחוז") is None
+    assert SLOT.temperature_from("תפעיל טיימר ל5 דקות") is None
+    # One character past the preposition is enough: a blind opened to nothing.
+    assert SLOT.level_from("תפתח את התריסים ל0") == 0
+
+
+def test_a_degree_and_a_percent_are_not_the_same_size_of_step():
+    """`_STEP_SCALE`. The unmarked step is 2 on a thermostat and 20 on a light,
+    and reading one table for both is why `brightness_step_pct` and
+    `volume_step_pct` were never filled at all.
+
+    Three readings, none of them guessed: **עוד raises a small step and only a
+    small one** (15 on both percent slots, unanimous); **the smaller adverb
+    wins a compound** - "טיפה יותר חזק" is 10, not 30; and **חזק sizes a light
+    and not a speaker**, where gold is 30 on twenty clauses and 20 on sixteen,
+    so it stays silent rather than guessing.
+
+    Measured per clause: temperature **389 agree, 1 disagree**, brightness
+    **572 and 6**, volume **311 and 2**, every one of the nine speech noise
+    inside the adverb.
+    """
+    size = DIRECTION.step_size
+    assert size("תנמיך קצת", "temperature_step") == 1
+    assert size("תנמיך קצת", "brightness_step_pct") == 10
+    assert size("תנמיך עוד קצת", "brightness_step_pct") == 15
+    assert size("תגביר בהרבה", "volume_step_pct") == 35
+    assert size("תגביר חזק", "brightness_step_pct") == 30
+    assert size("תגביר טיפה יותר חזק", "volume_step_pct") == 10
+    # The coin-flip cell stays quiet rather than falling through to unmarked.
+    assert size("תגביר חזק", "volume_step_pct") is None
+    # No adverb at all is the unmarked step, and it needs a verb behind it.
+    assert size("תנמיך את המזגן", "temperature_step") == 2
+    assert size("אני רוצה יותר", "temperature_step") is None
+
+
+def test_the_slot_the_sentence_names_settles_the_behaviour():
+    """The recurring shape, twice more. A step is a thermostat setting and a
+    level is a volume, and in both families the model answers with a behaviour
+    that cannot hold what the sentence said - a mode, an off, a transport verb.
+    `settle_steps` runs after these, so it has nothing to fill.
+
+    Each exclusion is the rule rather than a caveat. On climate, "שים את הפן של
+    המזגן על חזק" is a fan speed and חזק is also how a step is sized: without
+    that guard 72 fan rows read as temperatures. On media, "תוריד מיוט" is an
+    unmute whose verb is a downward step: without the mute branch running
+    first, 31 unmutes become volume calls.
+
+    Measured per clause over the corpus: climate **1,318 agree, 0 disagree**;
+    media **721 and 1**, the one being "מיות".
+    """
+    climate = DIRECTION.settle_climate
+    assert climate("climate_turn_on", {}, "תקרר את המזגן במטבח קצת",
+                   None, None, False) == "climate_set_temperature"
+    assert climate("climate_turn_off", {}, "בגן חם מדי, תנמיך",
+                   None, None, False) == "climate_set_temperature"
+    # A fan speed is not a step, however it is sized.
+    assert climate("climate_turn_on", {}, "שים את הפן של המזגן על חזק",
+                   "fan_mode", None, False) != "climate_set_temperature"
+
+    media = DIRECTION.settle_media
+    assert media("media_pause", "קצת פחות יותר חלש בגינה", False) == \
+        "media_set_volume"
+    assert media("media_play", "שים את הרמקול על שלושים אחוז", False,
+                 names_a_value=True) == "media_set_volume"
+    # The mute branch runs first and takes its own downward verb with it.
+    assert media("media_play", "תוריד מיוט בגינה", False) == "media_mute"
+
+
+def test_a_speaker_is_put_on_quiet_and_a_blind_is_stopped_with_the_same_word():
+    """Two vocabulary gaps, and one word that means different things one tool
+    apart.
+
+    "תשים על שקט" is a mute on 38 clauses and `בשקט` could not reach it: the
+    preposition is a separate token. `רדיו` is a source on all 41 of its
+    `media_control` clauses - and what to play on 150 `music_play` rows, none
+    of which reaches this function.
+
+    `די` is a **stop** on all 33 cover and valve clauses and a **pause** on all
+    111 media ones, which is why it is in `_STOPS` and deliberately not in
+    `_MEDIA_STOPS`.
+    """
+    assert DIRECTION.settle_media("media_play", "תשים על שקט במטבח", False) == \
+        "media_mute"
+    assert DIRECTION.settle_media("media_next_track", "שים רדיו במטבח", False) == \
+        "media_select_source"
+    assert "די" in DIRECTION._STOPS
+    assert "די" not in DIRECTION._MEDIA_STOPS
+
+
+def test_a_placement_with_nothing_to_place_is_not_a_placement():
+    """The mirror of the promotion above it. Over the corpus **684 of 684**
+    cover and valve clauses naming a level are gold `place`, and of the 5,116
+    naming none only 21 are - so a `cover_set_position` on a silent clause is
+    the model reaching for the behaviour rather than the sentence asking.
+
+    Handed back to the verb, and `settle` is asked from both ends so a clause
+    whose verbs point two ways stays silent. **4,558 agree, 0 disagree.**
+    """
+    named = DIRECTION.settle_named
+    assert named("cover_set_position", "הרם את הווילונות בחדר ילדים") == \
+        "cover_open"
+    assert named("valve_set_position", "תסגור את הברז במטבח") == "valve_close"
+    # With a level it is a placement, which is the rule this mirrors.
+    assert named("cover_set_position", "תפתח את הוילונות לשבעים וחמישה",
+                 at_a_position=True) == "cover_set_position"
+    # Verbs pointing two ways settle nothing.
+    assert named("cover_set_position", "הוילונות בסלון") == "cover_set_position"
+
+
+def test_a_scene_is_named_by_its_mode_when_it_is_not_named_by_its_noun():
+    """`DISCRIMINATING_WEAK`, and its order is the rule rather than an accident
+    of the literal: "תפעיל מצב שבת" says both markers and is a scene.
+
+    `מצב` is what an Israeli calls a scene when they do not call it a scene -
+    222 of the 234 silent scene clauses - and the run-verbs are the mirror, a
+    script being a thing you activate. The ladder takes routine_run from **655
+    agree, 0 disagree, 966 silent** to **1,074, 4 and 543**.
+
+    A run-verb needs something to run: all 194 clauses this reads as a script
+    name one, and "תפעיל את זה" names nothing, so the model's answer stands.
+    Not one of the 194 says a demonstrative, so the guard is free.
+    """
+    siblings = ["scene_activate", "script_run", "automation_turn_on",
+                "automation_turn_off", "button_press"]
+    settle = DIRECTION.settle_action
+    assert settle("script_run", siblings, "מצב שבת") == "scene_activate"
+    assert settle("script_run", siblings, "תפעיל מצב שבת") == "scene_activate"
+    assert settle("scene_activate", siblings, "תפעיל יציאה מהבית") == "script_run"
+    assert settle("scene_activate", siblings, "תפעיל את זה") == "scene_activate"
+
+
+def test_the_weather_question_names_its_own_day():
+    """The slot existed and nothing read it, so "ירד גשם מחר" was answered with
+    today's sky - a wrong answer rather than a missing one.
+
+    Measured per clause over every `get_weather` call: **50 agree, 0 disagree,
+    0 silent**, and quiet on all 81 clauses whose gold names no day. Today is
+    spelled by saying nothing, so a zero is never written into the call.
+    """
+    day = SLOT.day_offset_from
+    assert day("ירד גשם מחר") == 1
+    assert day("ירד גשם מחרתיים") == 2
+    assert day("מה הטמפרטורה היום") == 0
+    assert day("מה מזג האוויר") is None
+
+
+def test_one_wrong_letter_in_the_politeness_is_still_the_bare_question():
+    """`names_a_clock` requires everything left over to be politeness, which is
+    what keeps "מה השעה בניו יורק" out. One edit of tolerance on that closed
+    set rescues "מה השעה כרגא" and "עוקיי מה השעה כרגע" without touching the
+    guard: a city is not one edit from a word meaning please.
+
+    Over the corpus this reads a clock on **182** genuine datetime rows against
+    173 before, and on **zero** rows that are not one, unchanged.
+    """
+    assert ROUTER.names_a_clock("מה השעה כרגא")
+    assert ROUTER.names_a_clock("עוקיי, מה השעה כרגע תודה")
+    assert not ROUTER.names_a_clock("מה השעה בניו יורק")
+
+
+def test_a_robot_mower_is_a_robot_vacuum_and_a_boiler_takes_a_temperature():
+    """The last four of Home Assistant's own intents this integration could not
+    reach. `lawn_mower` mirrors `vacuum`'s three services exactly under
+    different names, and `water_heater.set_temperature` takes the same argument
+    under the same name as `climate`'s.
+
+    A fallback fires only when the primary domain found nothing in the room, so
+    it can turn a refusal into an action and never one action into another.
+    """
+    fallback = CONST.FALLBACK_DOMAINS
+    assert ("lawn_mower", "lawn_mower", "start_mowing") in fallback["vacuum_start"]
+    assert ("lawn_mower", "lawn_mower", "dock") in fallback["vacuum_return_to_base"]
+    assert ("water_heater", "water_heater", "set_temperature") in \
+        fallback["climate_set_temperature"]
+
+
+def test_a_phone_is_not_a_speaker_and_the_verb_says_which():
+    """`notify_send` and `broadcast` take one argument each and it is the same
+    one, so the model has nothing to go on but the verb - and it picks wrong,
+    or refuses outright, on 14 of the benchmark's notification rows.
+
+    The verbs separate them completely and in both directions: **199 agree, 0
+    disagree** for the notification words and **102 and 0** for the broadcast
+    ones. Not one corpus clause says both, so the order they are read in is
+    free rather than load-bearing.
+    """
+    named = DIRECTION.settle_named
+    assert named("broadcast", "תשלח הודעה לכולם שתרדו למטה") == "notify_send"
+    assert named("broadcast", "תעדכן את כולם שיוצא מהבית") == "notify_send"
+    assert named("notify_send", "תכריז בכל הבית שהאוכל מוכן") == "broadcast"
+    assert named("notify_send", "תשדר ברמקולים שהאוכל מוכן") == "broadcast"
+    # A verb neither list carries settles nothing: "תודיע" is how both are said.
+    assert named("broadcast", "תודיע בבית שהאוכל מוכן") == "broadcast"
+
+
+def test_hebrew_asks_a_yes_no_question_with_no_interrogative_at_all():
+    """"החלון פתוח" is a question and, written down, is exactly a statement.
+    Hebrew forms it with intonation, so `_QUESTION` - which looks for האם, איזה,
+    מה - finds nothing, and fifteen benchmark rows reached the model with the
+    whole catalogue in front of them and came back as `cover_control`,
+    `lock_control`, `light_control`: a question about a window answered by
+    opening it.
+
+    What separates the readings is the **verb**, or rather its absence. פתוח is
+    a passive participle and describes a window; תפתח is an imperative and
+    opens it.
+
+    Measured per clause over the corpus: **981 agree, 1 disagree**, and 80 of
+    the 981 are clauses the question gate does not reach today.
+    """
+    asks = ROUTER.looks_like_question
+    assert asks("החלון פתוח")
+    assert asks("הדלת בסלון נעול")
+    assert asks("התאורה בפינת העבודה דולק")
+    # An imperative in the same sentence makes it an order again.
+    assert not asks("תפתח את החלון")
+    assert not asks("תנעל את הדלת בסלון")
+
+
+def test_an_adjective_is_not_introduced_by_a_preposition():
+    """The bare-token rule, and why it is a rule rather than an optimisation.
+
+    `_tokens` strips the Hebrew clitics, and stripping the ל of the infinitive
+    לפתוח leaves פתוח. Matching the adjectives through it read **1,051** plain
+    orders as questions - "אתה יכול לפתוח את האורות" among them - against 981
+    genuine ones.
+
+    And a level is an instruction, not a question: nobody asks whether a blind
+    is half open. Ten corpus clauses say "חצי פתוח" and all ten are covers.
+    """
+    asks = ROUTER.looks_like_question
+    assert not asks("אתה יכול לפתוח את האורות בחדר האוכל")
+    assert not asks("תקשיבי, אפשר לפתוח לי את המצלמות בפינת המטבח")
+    assert not asks("את התריס בחדר שינה שלנו חצי פתוח")
+
+
+def test_a_state_adjective_is_not_a_verb():
+    """`tool_router._STATE_ADJECTIVES` and `slot_match.SETTING_WORDS["state"]`
+    are two halves of one list kept in different modules, because `slot_match`
+    imports the router and the dependency cannot run the other way.
+
+    This is what keeps them in step. Every word the slot resolver knows has to
+    be one the question gate recognises, or a sentence naming it would be read
+    as an order; and no adjective may sit in the imperative list, or the gate
+    would never fire.
+    """
+    known = {ROUTER._fold(w) for w in SLOT.SETTING_WORDS["state"]}
+    assert known <= ROUTER._STATE_ADJECTIVES
+    # The query family's own adjectives, which carry the singular forms.
+    for word in ("דולק", "כבוי", "פתוח", "נעול", "סגורה"):
+        assert ROUTER._fold(word) in ROUTER._STATE_ADJECTIVES
+    # The query family is excluded from `_IMPERATIVES` precisely because its
+    # "verbs" are these words, so the two lists barely meet. סגור is the one
+    # word in both, and in Hebrew it really is both - "close!" and "closed",
+    # spelled the same. A clause carrying it therefore reaches neither reading
+    # and the model's own answer stands, which is the safe direction.
+    assert (ROUTER._STATE_ADJECTIVES
+            & {ROUTER._fold(v) for v in ROUTER._IMPERATIVES}) == {ROUTER._fold("סגור")}
+    # And "leave it on" is an order, though no family claims the verb.
+    assert not ROUTER.looks_like_question("תשאיר את האור דולק")
+
+
+def test_asking_when_a_countdown_ends_does_not_start_one():
+    """`מתי` was not in the interrogative table, so `settle_timer` never saw a
+    question and answered "מתי הטיימר נגמר" by *starting* a countdown - the
+    worst reading available, since the household asked how long was left.
+
+    Measured over the whole corpus: 19 clauses say it and every one is gold
+    `timer_control{query}`; **not one row that would actuate anything**. It is
+    also on 122 off-topic rows - "מתי נולד רמברנדט" - and all 122 stay refused,
+    because they name no device and so take no room bonus.
+    """
+    assert ROUTER.looks_like_question("מתי הטיימר נגמר")
+    assert not ROUTER.looks_off_topic("מתי הטיימר נגמר")
+    assert ROUTER.looks_off_topic("אה, מתי נולד רמברנדט בבקשה")
+    settled = DIRECTION.settle_timer(
+        "timer_start", {}, "נו מתי הטיימר נגמר", True,
+        ROUTER.names_a_timer("נו מתי הטיימר נגמר"))
+    assert settled == "timer_status"

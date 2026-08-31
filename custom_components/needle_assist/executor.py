@@ -88,6 +88,7 @@ from .const import (
     ROUTINE_SIBLING,
     SERVICE_MAP,
     SETTING_SLOT,
+    STEP_SOURCE,
     TOOL_ARGS,
     TOOL_DOMAIN,
     VIRTUAL_OF,
@@ -581,7 +582,9 @@ class CallExecutor:
         # values of one enum now, where the router used to rank the toggle
         # third and a tight shortlist usually cut it. 335 agree and 0 disagree
         # on the rows whose gold really is a toggle; see `direction.TOGGLES`.
-        if utterance and (settled := direction.settle_toggle(tool, utterance)) != tool:
+        if utterance and (settled := direction.settle_toggle(
+                tool, utterance,
+                slot_match.level_from(utterance) is not None)) != tool:
             _LOGGER.debug("%r says %s rather than a toggle", utterance, settled)
             tool = settled
 
@@ -691,7 +694,7 @@ class CallExecutor:
         if utterance:
             settled = direction.settle_named(
                 tool, utterance,
-                slot_match.percent_from(utterance) is not None,
+                slot_match.level_from(utterance) is not None,
                 slot_match.setting_from(utterance, "color_name") is not None)
             if settled != tool:
                 _LOGGER.debug("the clause names %s, not %s", settled, tool)
@@ -708,7 +711,8 @@ class CallExecutor:
                           or tool == "music_play"):
             settled = direction.settle_media(
                 tool, utterance, slot_match.names_a_level(utterance),
-                slot_match.a_plain_request(utterance))
+                slot_match.a_plain_request(utterance),
+                slot_match.level_from(utterance) is not None)
             if settled != tool:
                 _LOGGER.debug("the sentence says %s, not %s", settled, tool)
                 tool = settled
@@ -722,8 +726,15 @@ class CallExecutor:
         # "שבעים וחמישה אחוז", "חצי", "רבע שעה" - and nothing here could read
         # one until `hebrew_numbers`. 1,175 agree and 3 disagree on the
         # percentage; see `const.NUMBER_SLOT`.
+        if utterance and "day_offset" in TOOL_ARGS.get(tool, frozenset()):
+            # Truthy, not `is not None`: today is spelled by saying nothing.
+            if (day := slot_match.day_offset_from(utterance)):
+                args["day_offset"] = day
+            else:
+                args.pop("day_offset", None)
+
         if (utterance and (slot := NUMBER_SLOT.get(tool))
-                and (said := slot_match.percent_from(utterance)) is not None):
+                and (said := slot_match.level_from(utterance)) is not None):
             args[slot] = said
 
         # And the yes-or-no, read the same way and in the same place. A fan
@@ -754,15 +765,21 @@ class CallExecutor:
                               slot, args[slot])
                 args.pop(slot, None)
 
+        # Which step slots this behaviour declares and the sentence has left
+        # room for. See `const.STEP_SOURCE`.
+        def _fillable_steps(name: str, said: str) -> tuple[str, ...]:
+            takes = TOOL_ARGS.get(name, frozenset())
+            return tuple(slot for slot, source in STEP_SOURCE.items()
+                         if slot in takes
+                         and slot_match.unsupported(said, source))
+
         # The same verb also settles which way a relative argument points, and
         # `_service_data` below adds those to the device's current reading - so
         # a wrong sign moves the thermostat away from what was asked instead of
         # towards it. 1222 right and 1 wrong; see `direction`.
         if utterance:
             args = direction.settle_steps(
-                args, utterance,
-                "temperature_step" in TOOL_ARGS.get(tool, frozenset())
-                and slot_match.unsupported(utterance, "temperature"))
+                args, utterance, _fillable_steps(tool, utterance))
 
         if tool in QUERY_TOOLS:
             return await self._answer_query(tool, args, device_id, utterance,
@@ -1055,6 +1072,38 @@ class CallExecutor:
         chosen = self.options.get(CONF_MUSIC_PLAYER)
         return chosen if chosen in players else None
 
+    async def _forecast_day(self, state: Any, day: int) -> dict[str, Any] | None:
+        """One day of `weather.get_forecasts`, or ``None``.
+
+        ``None`` covers all three ways this can come up empty - the entity does
+        not do daily forecasts, the service failed, the list is shorter than
+        the day asked for - and the caller says so rather than answering with
+        today's sky under tomorrow's name.
+        """
+        # WeatherEntityFeature.FORECAST_DAILY. Named rather than imported: the
+        # `weather` component is not a dependency of this integration and
+        # importing it would make it one.
+        if not int(state.attributes.get("supported_features") or 0) & 1:
+            return None
+        try:
+            response = await self.hass.services.async_call(
+                "weather", "get_forecasts", {"type": "daily"},
+                target={"entity_id": state.entity_id},
+                blocking=True, return_response=True)
+        except Exception as err:  # unsupported, unavailable, malformed
+            _LOGGER.error("weather.get_forecasts failed: %s", err)
+            return None
+        # `ServiceResponse` is arbitrary JSON as far as the type system is
+        # concerned, so every step down into it is checked rather than assumed.
+        entry = (response or {}).get(state.entity_id)
+        if not isinstance(entry, dict):
+            return None
+        days = entry.get("forecast")
+        if not isinstance(days, list) or day >= len(days):
+            return None
+        wanted = days[day]
+        return wanted if isinstance(wanted, dict) else None
+
     async def _call(self, domain: str, service: str, data: dict[str, Any],
                     context: Context, tool: str, entities: int,
                     speech: str | None = None) -> CallOutcome:
@@ -1095,11 +1144,23 @@ class CallExecutor:
             if not states:
                 return CallOutcome(tool, False, "no weather entity")
             st = states[0]
-            temp = st.attributes.get("temperature")
+            # Which day was asked for. The slot existed and nothing read it,
+            # so "ירד גשם מחר" was answered with today's sky - a wrong answer
+            # rather than a missing one, and the sentence had said so plainly.
+            day = (slot_match.day_offset_from(utterance) or 0) if utterance else 0
+            condition, temp = st.state, st.attributes.get("temperature")
+            if day > 0:
+                forecast = await self._forecast_day(st, day)
+                if forecast is None:
+                    return CallOutcome(tool, False, "no forecast for that day")
+                condition = forecast.get("condition") or st.state
+                temp = forecast.get("temperature", forecast.get("templow"))
             # The raw state is an English slug; say it in Hebrew.
-            parts = [f"מזג האוויר {WEATHER_STATES_HE.get(st.state, st.state)}"]
+            parts = [f"מזג האוויר {WEATHER_STATES_HE.get(condition, condition)}"]
             if temp is not None:
                 parts.append(f"{round(float(temp))} מעלות")
+            if day:
+                parts.insert(0, "מחר" if day == 1 else "מחרתיים")
             return CallOutcome(tool, True, speech=", ".join(parts),
                                entities=1, answered_from=(st.entity_id,))
 
