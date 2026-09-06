@@ -3612,3 +3612,21 @@ def test_the_one_room_the_fuzzy_pass_cannot_reach_spells_its_typo_out():
     claimed = [slug for slug, forms in AREA_MAP.AREA_ALIASES.items()
                if "ממדד" in forms]
     assert claimed == ["safe_room"], claimed
+
+
+def test_a_failed_generation_on_a_named_routine_is_rebuilt_too():
+    """The third thing a sentence can name outright, and the safest of them.
+
+    All five automation rows that fail this way are engine failures rather than
+    refusals - the model derails on the escape sequences while the sentence has
+    already said the answer. 1,172 agree and 3 disagree over the corpus, and
+    the rule speaks on none of the 200 off-topic rows that get past the gates.
+    """
+    assert REPAIR.recover("אני רוצה שתפעיל את האוטומציה תריסים בבוקר") == {
+        "name": "routine_run", "arguments": {"action": "enable"}}
+    assert REPAIR.recover("את יכולה לכבות את האוטומציה השקיה אוטומטית") == {
+        "name": "routine_run", "arguments": {"action": "disable"}}
+    assert REPAIR.recover("תפעיל את הסצנה ערב") == {
+        "name": "routine_run", "arguments": {"action": "scene"}}
+    # A sentence naming no routine at all is still left alone.
+    assert REPAIR.recover("תדליק את האור בסלון") is None
