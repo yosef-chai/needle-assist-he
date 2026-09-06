@@ -54,6 +54,35 @@ def test_every_translation_carries_every_string():
         assert have == base, f"{path.name}: {base ^ have}"
 
 
+def test_the_dialogs_are_written_to_one_pattern():
+    """"Uniform" as a property of the files rather than a claim about them.
+
+    Three dialogs, two languages, and the only thing that had ever kept them
+    in one voice was reading them side by side. The pattern is: no step
+    declares a title, because Home Assistant already shows the integration's
+    name and a second one in the body reads as a heading repeated; each step
+    opens with exactly one sentence saying what it is for; every field carries
+    a label that is a noun phrase and not a sentence, and a helper under it
+    that is. Both languages, so they cannot drift apart in tone while staying
+    identical in keys.
+    """
+    files = [COMPONENT / "strings.json"]
+    files += sorted((COMPONENT / "translations").glob("*.json"))
+    for path in files:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        for flow, node in doc.items():
+            for step, body in (node.get("step") or {}).items():
+                where = f"{path.name} {flow}.{step}"
+                assert "title" not in body, f"{where}: Home Assistant titles it"
+                description = body.get("description", "")
+                assert description.endswith("."), f"{where}: description"
+                helpers = body.get("data_description") or {}
+                for field, label in (body.get("data") or {}).items():
+                    assert not label.endswith("."), f"{where}.{field}: label"
+                    assert field in helpers, f"{where}.{field}: no helper"
+                    assert helpers[field].endswith("."), f"{where}.{field}: helper"
+
+
 def test_the_hebrew_strings_keep_their_direction_marks():
     """A left-to-right run inside a Hebrew sentence needs one, or the dot of
     ".cact" renders on the wrong side of the word. The marks are invisible, so
