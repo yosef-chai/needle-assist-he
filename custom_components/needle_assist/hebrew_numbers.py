@@ -226,6 +226,18 @@ _MIN_IDIOM: Final[dict[str, int]] = {
     "שעה וחצי": 90, "שעתיים": 120,
 }
 
+#: The hour nouns that count more than one, and the half that can be hung on
+#: them. Singular deliberately absent: "שעה וחצי" is already a whole idiom in
+#: the table above at ninety minutes, and reading it here would count the half
+#: twice. See :func:`_half_past_the_hour`.
+_PLURAL_HOURS: Final = _folds("שעות", "שעתיים", "השעות")
+_HALF: Final = _folds("וחצי", "חצי")
+
+#: Every way the sentence can say *hours*, for the one question the
+#: decomposition asks of it. `_HOURS` alone is not enough: שעתיים is a word
+#: rather than a number and a noun, and it lives in `_MIN_IDIOM`.
+_HOUR_WORDS: Final = (*_HOURS, *_folds("שעתיים"))
+
 _PCT_IDIOM_F: Final[dict[str, int]] = {
     normalise(k): v for k, v in _PCT_IDIOM.items()}
 _MIN_IDIOM_F: Final[dict[str, int]] = {
@@ -289,6 +301,35 @@ def percent_in(text: str) -> int | None:
     return found.pop() if len(found) == 1 else None
 
 
+def _half_past_the_hour(words: list[str]) -> bool:
+    """Is there a half hung on the end of an hour count - "שעתיים וחצי"?
+
+    `_MIN_IDIOM` carries "שעה וחצי" and "שעתיים" as whole idioms, and the
+    singular one is complete where the plural one is not: "שעתיים" matched,
+    the reader took its two hours, and the trailing half fell on the floor. A
+    household asking for two and a half hours got a timer half an hour short.
+
+    Glued as well as spaced, because the speech noise glues these -
+    "שעתייםוחצי" is in the corpus. Measured over the v11 corpus on every timer
+    clause naming one: **11 agree, 0 disagree**.
+    """
+    # The particle comes off first - "שעתיים" arrives as "לשעתיים" far more
+    # often than bare - and by hand rather than through `_bare`, whose
+    # allow-list cannot hold "שעתייםוחצי", which is one word and two.
+    stems = [next((word[len(particle):] for particle in _PARTICLES
+                   if word.startswith(particle) and len(word) > len(particle)),
+                  word)
+             for word in words]
+    for position, stem in enumerate(stems):
+        before = stems[position - 1] if position else ""
+        for hour in _PLURAL_HOURS:
+            if stem.startswith(hour) and stem != hour and stem.endswith(_HALF):
+                return True
+            if stem in _HALF and before == hour:
+                return True
+    return False
+
+
 def duration_in(text: str) -> dict[str, int]:
     """``{"hours": .., "minutes": .., "seconds": ..}`` for the countdown named.
 
@@ -302,18 +343,30 @@ def duration_in(text: str) -> dict[str, int]:
     `executor._seconds` sums the three back together either way, so the
     decomposition is a spelling and not a decision.
 
-    The corpus is *not* consistent about the other direction - "טיימר של
-    שעתיים" is `{hours: 2}` in one row and `{minutes: 120}` in the next, and
-    "טיימר שעה" is `{minutes: 60}` - so a whole number of hours is spelled in
-    hours here and `data/generate.py` was changed to spell it the same way.
-    Two spellings of one countdown are two labels for one command, and no
-    model can learn which is wanted.
+    **Promoted only as far as the sentence went.** Seconds always roll into
+    minutes, because the schema caps `seconds` at 59 and there is nowhere else
+    for ninety of them to go. Minutes roll into hours only when the sentence
+    said *hours*: "תשעים דקות" is ninety minutes and not an hour and a half,
+    and `minutes` is capped at 600 precisely so it can hold them.
+
+    Measured over the v11 corpus on every timer clause where the reading is
+    the same countdown as gold spelled differently: promoting seconds agrees
+    **6 times and disagrees none**, and promoting minutes past an hour the
+    sentence never named disagreed **59 times against one agreement** - and
+    that one says "לשעתיים ועשרים דקות", so it named the hours too and is not
+    a promotion at all. Either spelling is the same command to
+    `executor._seconds`; this one is also the words the household used.
     """
     if not text:
         return {}
     phrase = normalise(text)
     total = 0
     named = False
+    # Both asked of the raw phrase, before the idiom loop below eats the words
+    # they read: it replaces "שעתיים" with a space, and after that neither the
+    # half nor the hours are still there to be seen.
+    half_hour = _half_past_the_hour(phrase.split())
+    said_hours = any(word in phrase for word in _HOUR_WORDS)
     for key, value in _MIN_IDIOM_F.items():
         if key in phrase:
             total += value * 60
@@ -342,10 +395,15 @@ def duration_in(text: str) -> dict[str, int]:
             total += scale
             named = True
             break
+    if half_hour and total >= 3600:
+        # The half the plural idiom left behind. Guarded on a whole hour having
+        # been counted, so a bare חצי - which is also fifty per cent, and the
+        # commonest entry in `_PCT_IDIOM` - can never invent a countdown.
+        total += 1800
     if not named or total <= 0:
         return {}
     out: dict[str, int] = {}
-    if total >= 3600:
+    if total >= 3600 and said_hours:
         out["hours"] = total // 3600
         total %= 3600
     if total >= 60:

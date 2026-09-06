@@ -833,13 +833,24 @@ def _hits(keywords: list[str], toks: set[str], query: str) -> int:
 # the corpus carries קבי for כבי, תדליכי for תדליקי, תקבי for תכבי.
 _KAF_FOLD: Final = str.maketrans("ק", "כ")
 
+# ט and ת are one sound too - טרים for תרים, טנמיך for תנמיך - and the same
+# argument does *not* carry over, because these two letters open far more of
+# this vocabulary than ק does. Offered as an option rather than folded in, and
+# taken up by exactly one caller: `direction.which_way`, where a false match
+# costs the *sign* of a step that some other reader has already decided exists.
+# Measured there at 9 rescued, 0 disagreements and 0 steps invented; folding it
+# in everywhere would change what `settle` and `settle_action` see, and neither
+# of those has been re-measured against it.
+_TET_FOLD: Final = str.maketrans("קט", "כת")
+
 # The particles Hebrew glues to the front of a word, as
 # `hebrew_text._PREFIX_LETTERS` spells them. Only the anchored
 # reading below needs them, and only to let a match begin just after one.
 _PREFIX_CLITICS: Final = "ובהלכמש"
 
 
-def _hits_noisy(keywords: list[str], query: str) -> int:
+def _hits_noisy(keywords: list[str], query: str,
+                fold: dict[int, int] | None = None) -> int:
     """:func:`_hits` again, deaf to a lost space and to the ק/כ homophone.
 
     **Not a replacement for `_hits` and not for the router.** Wider phonetic
@@ -859,6 +870,9 @@ def _hits_noisy(keywords: list[str], query: str) -> int:
                   edge. Giving up the right edge is the whole point: "כבהאת"
                   is the verb with the next word glued to it and has no
                   boundary at its end. Three characters is enough here.
+    ``fold`` replaces the homophone table for one call; see :data:`_TET_FOLD`
+    for the one caller that passes it and why it is not the default.
+
     ``plain``     no boundary at all, four characters and up. Recovers the
                   split "לסג ור", which no word-start rule can see because the
                   match begins in the middle of the *following* token.
@@ -873,7 +887,7 @@ def _hits_noisy(keywords: list[str], query: str) -> int:
     disagree**, plain alone **47 and 0**, together **49 and 0**. They overlap
     but neither contains the other, which is why both are here.
     """
-    folded = _fold(query).translate(_KAF_FOLD)
+    folded = _fold(query).translate(_KAF_FOLD if fold is None else fold)
     flat, starts, at = [], set(), 0
     for word in folded.split():
         starts.add(at)
@@ -999,6 +1013,22 @@ def names_a_timer(query: str) -> bool:
     return bool(_hits(list(TIMER_NOUNS), _tokens(query), query))
 
 
+#: A room named after a thing. "חדר המחשב" is where the computer is and
+#: מחשב is a switch noun, so a sentence about the light in that room named two
+#: families, and two families settle nothing - the reader went quiet and the
+#: household asking for the light got the plug switched off instead. The room
+#: is not a device.
+#:
+#: The definite article is required and it is what makes this safe. Without it
+#: the pattern reaches "במרפסת חם מדי, תקרר" and eats חם, the only climate
+#: evidence in the clause; with it, measured over the v11 corpus per clause
+#: against the family of gold's own call, **222 rescued and 0 broken**.
+#:
+#: Only the heads that take a noun after them. מרפסת and חצר are whole room
+#: names on their own and never head another word here.
+_ROOM_HEAD: Final = re.compile(r"(?:חדר|פינת|פינה)\s+ה\S+")
+
+
 def family_named(query: str) -> str | None:
     """The one family this sentence's nouns name, or ``None``.
 
@@ -1011,7 +1041,15 @@ def family_named(query: str) -> str | None:
     interrogatives rather than devices, and every sentence carrying one also
     names the device it is asking about. See `direction.family_named`, which
     is where the answer is used and where the measurement lives.
+
+    The room is taken out before the vote; see :data:`_ROOM_HEAD`. Only here,
+    and not in :func:`select_tool_names`: the shortlist exists to make sure the
+    model *can* answer, so a noun too many there costs one of five slots and a
+    noun too few costs the whole sentence. This vote is the opposite trade -
+    it overrules a model that has already answered - and it is the one that was
+    measured.
     """
+    query = _ROOM_HEAD.sub(" ", query)
     tokens = _tokens(query)
     named = [family for family, nouns in FAMILY_NOUNS.items()
              if family != "query" and _hits(list(nouns), tokens, query)]

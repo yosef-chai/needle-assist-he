@@ -3819,3 +3819,129 @@ def test_an_announcement_is_recovered_where_other_tools_are_offered_too():
     assert REPAIR.recover("תקשיבי, קדימה תשלח הודעה לכולם שתרדו למטה תודה") == {
         "name": "notify_send", "arguments": {}}
     assert REPAIR.recover("תשמע, אפשר שתכבי את הדוד בחדר ילדים אם אפשר") is None
+
+
+def test_the_countdown_keeps_the_unit_the_sentence_chose():
+    """"תשעים דקות" is ninety minutes, and it was coming back as an hour and a
+    half.
+
+    `duration_in` summed every unit and decomposed the total with nothing
+    overflowing its own bound, which promotes seconds into minutes *and*
+    minutes into hours. The two are not the same question. The schema caps
+    `seconds` at 59, so ninety of them have nowhere else to go; `minutes` is
+    capped at 600 precisely so it can hold a hundred and twenty.
+
+    Measured over the v11 corpus on every timer clause where the reading is
+    gold's countdown spelled differently: promoting seconds agrees **6 times
+    and disagrees none**, promoting minutes past an hour the sentence never
+    named disagreed **59 times against one agreement** - and that one names
+    the hours too, so it is not a promotion at all.
+    """
+    assert SLOT.duration_from("תתחיל ספירה של 120 דקות") == {"minutes": 120}
+    assert SLOT.duration_from("תתחיל ספירה של תשעים דקות") == {"minutes": 90}
+    assert SLOT.duration_from("נו תוכל לשים לי טיימר של שישים דקות") == {
+        "minutes": 60}
+
+    # Seconds still roll up, because the schema gives them nowhere to stay.
+    assert SLOT.duration_from("טיימר ל90 שניות") == {"minutes": 1, "seconds": 30}
+
+    # And a sentence that names hours is spelled in hours.
+    assert SLOT.duration_from("טיימר של שעתיים") == {"hours": 2}
+    assert SLOT.duration_from("טיימר לשעתיים ועשרים דקות") == {
+        "hours": 2, "minutes": 20}
+
+
+def test_a_half_hung_on_an_hour_count_is_half_an_hour():
+    """"שעתיים וחצי" was two hours, and the household lost the half.
+
+    `_MIN_IDIOM` carries "שעה וחצי" and "שעתיים" as whole idioms, and the
+    singular one is complete where the plural is not: "שעתיים" matched, its two
+    hours were taken and the trailing half fell on the floor. **11 agree, 0
+    disagree** over the v11 corpus.
+    """
+    for query in ("תעמיד טיימר לשעתיים וחצי אם אפשר",
+                  "תשמע, אפשר שתעמיד טיימר לשעתייםוחצי בבקשה תודה"):
+        assert SLOT.duration_from(query) == {"hours": 2, "minutes": 30}, query
+    assert SLOT.duration_from("טיימר לשלוש שעות וחצי") == {
+        "hours": 3, "minutes": 30}
+
+    # The singular is already an idiom and must not be counted twice, and a
+    # half with no hour behind it invents nothing - חצי is also fifty per cent.
+    assert SLOT.duration_from("נו תקשיבי, טיימר לשעה וחצי") == {
+        "hours": 1, "minutes": 30}
+    assert SLOT.duration_from("כאילו תתחיל ספירה של חצי שעה") == {"minutes": 30}
+    assert SLOT.duration_from("תוריד את הווליום לחצי") == {}
+
+
+def test_the_particle_survives_being_heard_as_ayin():
+    """"האזן לי עת הזמרת עומר אדם" says the kind and the name and typed as
+    nothing.
+
+    `extract_music` writes את in three anchored places and the corrupted
+    particle sits between the verb and the kind, so all three miss. The same
+    alef-heard-as-ayin the interrogative has read through since round seven.
+
+    Measured over every media-family clause of the v11 corpus on what
+    `media_type` the parser claims: **3,322 agree against 3,319, three fewer
+    silent, and not one new disagreement**.
+    """
+    for query in ("תשמעי, האזן לי עת הזמרת עומר אדם",
+                  "תשמעי, האזן לי את הזמרת עומר אדם"):
+        request = SLOT.extract_music(query)
+        assert request is not None and request.media_type == "artist", query
+        assert request.media_id == "עומר אדם", query
+
+    # A kind with nothing after it is still not something to play: that is a
+    # resume, and it has to stay one through the noise as well.
+    assert SLOT.extract_music("רגע, תנגן עת השיר במטבח") is None
+    assert SLOT.extract_music("רגע, תנגן את השיר במטבח") is None
+
+
+def test_a_direction_the_noise_broke_is_read_again():
+    """"טרים בהרבה את הווליום" sized its step at 35 and had no sign for it.
+
+    `settle` already re-reads a silent clause through the speech noise for a
+    toggle; `which_way` did not, so a step whose verb the noise corrupted was
+    dropped whole. ט and ת are one sound in Israeli Hebrew, and this caller -
+    only this one - reads them as one.
+
+    Measured per clause over the v11 corpus. Where gold carries a step and the
+    strict reader is silent: **9 rescued, 0 disagree**. Where gold carries no
+    step: it speaks on 149 clauses and **not one of them also sizes a step**,
+    and a sign alone fills nothing.
+    """
+    assert DIRECTION.which_way("אוקיי, יאללה טרים בהרבה את הווליום בממ״ד") == 1
+    assert REPAIR.settle("media_control", {"action": "volume"},
+                         "אוקיי, יאללה טרים בהרבה את הווליום בממ״ד") == (
+        "media_set_volume", {"volume_step_pct": 35})
+
+    # The strict reader still decides wherever it can hear, and a clause that
+    # names no direction at all still names none.
+    assert DIRECTION.which_way("תרים את הווליום בהרבה") == 1
+    assert DIRECTION.which_way("תוריד את הווליום קצת") == -1
+    assert DIRECTION.which_way("תדליק את האור בסלון") is None
+
+
+def test_a_device_noun_inside_a_room_name_is_not_a_device():
+    """"תכבה את האור בחדר המחשב" was switching the plug off.
+
+    מחשב is a switch noun and it is sitting inside the *room*, so the sentence
+    named two families, two families settle nothing, and `family_named` went
+    quiet - leaving the model's own `switch_control` to stand on a sentence
+    that says אור.
+
+    The definite article is what makes the mask safe: without it the pattern
+    reaches "במרפסת חם מדי, תקרר" and eats חם, the only climate evidence there.
+    Measured per clause over the v11 corpus against the family of gold's own
+    call: **222 rescued, 0 broken**.
+    """
+    for query in ("תשמעי, תוכל לכבות את האור בחדר המחשב",
+                  "בבקשה כבה את האורות בחדר המחשב תודה"):
+        assert ROUTER.family_named(query) == "light", query
+        assert REPAIR.settle("switch_control", {"action": "shut"}, query)[0] \
+            == "light_turn_off", query
+
+    # The device outside the room's name still votes, and a room that heads no
+    # noun is left alone.
+    assert ROUTER.family_named("כבה את המחשב בסלון") == "switch"
+    assert ROUTER.family_named("רגע, במרפסת חם מדי, תקרר משמעותית") == "climate"

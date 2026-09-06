@@ -153,7 +153,7 @@ import re
 from typing import Any, Final
 
 from .clause_split import CORRECTION
-from .tool_router import TOOL_HINTS, _fold, _hits, _hits_noisy, _tokens
+from .tool_router import _TET_FOLD, TOOL_HINTS, _fold, _hits, _hits_noisy, _tokens
 
 #: Tools that come in a pair the Hebrew words settle. Volume against play is
 #: deliberately absent; see the module docstring.
@@ -649,6 +649,20 @@ def which_way(text: str) -> int | None:
 
     The tiers are read in order and the first one that speaks decides, which
     is what keeps "יותר חלש" quiet rather than loud.
+
+    A clause the strict reader cannot hear is read again through the speech
+    noise, exactly as :func:`settle` does for a toggle and for the same reason:
+    "טרים בהרבה את הווליום בממ״ד" sizes its step at thirty-five and had no sign
+    to hang it on, so the step was dropped and a household asking for much
+    louder got nothing. ט and ת are one sound, so this call - and only this one
+    - reads them as one; see :data:`tool_router._TET_FOLD`.
+
+    Measured per clause over the v11 corpus. On clauses whose gold carries a
+    step and which the strict reader leaves silent: **9 rescued, 0 disagree**
+    (five of the nine without the ט/ת tolerance). And on the 22,893 clauses
+    whose gold carries no step at all, it speaks on 149 and **not one of them
+    also sizes a step** - a sign alone fills nothing, since `settle_steps` and
+    `settle_climate` both want a size before they write anything.
     """
     if not text or CORRECTION.search(_fold(text)):
         return None
@@ -656,6 +670,11 @@ def which_way(text: str) -> int | None:
     for up_words, down_words in TIERS:
         up = _hits(list(up_words), tokens, text)
         down = _hits(list(down_words), tokens, text)
+        if up != down:
+            return 1 if up > down else -1
+    for up_words, down_words in TIERS:
+        up = _hits_noisy(list(up_words), text, _TET_FOLD)
+        down = _hits_noisy(list(down_words), text, _TET_FOLD)
         if up != down:
             return 1 if up > down else -1
     return None

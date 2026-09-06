@@ -304,15 +304,24 @@ _MEDIA_KINDS: Final[tuple[tuple[str, str], ...]] = (
     ("playlist", r"ה?(?:פלייליסט|רשימת\s+השמעה|רשימת\s+ההשמעה)"),
     ("radio", r"ה?(?:תחנת\s+ה?רדיו|רדיו|תחנה)"),
 )
+#: ``[אע]ת`` and not ``את`` in all three places the particle is written
+#: here, which is the alef-heard-as-ayin the interrogative already reads
+#: through - see `_WHICH_ARE`. "האזן לי **עת** הזמרת עומר אדם" says the
+#: kind and the name perfectly and typed as nothing, because the corrupted
+#: particle sits between the verb and the kind and all three patterns are
+#: anchored. Measured over every media-family clause of the v11 corpus, on
+#: what `media_type` the parser claims against gold's: **3,322 agree
+#: against 3,319, three fewer silent, and not one new disagreement**.
 _MEDIA_KIND_RE: Final = tuple(
-    (kind, re.compile(r"^(?:את\s+)?" + pattern + r"\b\s*"))
+    (kind, re.compile(r"^(?:[אע]ת\s+)?" + pattern + r"\b\s*"))
     for kind, pattern in _MEDIA_KINDS
 )
 
 # "play me some music by X" - the noun carries no type of its own, it just
 # stands where one would be, and what follows ``של`` is an artist.
-_MUSIC_FILLER: Final = re.compile(r"^(?:את\s+)?(?:קצת\s+)?(?:מוזיקה|מוסיקה|משהו)\s*")
-_LEADING_ET: Final = re.compile(r"^\s*את\s+")
+_MUSIC_FILLER: Final = re.compile(
+    r"^(?:[אע]ת\s+)?(?:קצת\s+)?(?:מוזיקה|מוסיקה|משהו)\s*")
+_LEADING_ET: Final = re.compile(r"^\s*[אע]ת\s+")
 # Anchored on either a space or the start, because the filler noun in
 # "play me some music by X" is consumed before this runs and leaves "של" first.
 _OF: Final = re.compile(r"(?:^|\s)של\s+")
