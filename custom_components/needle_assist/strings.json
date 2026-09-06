@@ -42,7 +42,7 @@
         "data_description": {
           "music_player": "Which Music Assistant speaker plays when the request names no room. Leave empty if you have one player, or if you always say where you want the music.",
           "max_new_tokens": "A tool call is about 25 tokens. Long announcements need more, because Hebrew reaches a tool argument as escape sequences.",
-          "log_utterances": "Writes every request and what it did to needle_assist/utterances.jsonl under your configuration directory. It stays on this machine, and it is what a Hebrew correction can be measured against."
+          "log_utterances": "Writes every request to needle_assist/utterances.jsonl under your configuration directory: what it did, how long it took, and the ones refused before the model ran. It stays on this machine, and it is what a Hebrew correction can be measured against."
         }
       }
     }

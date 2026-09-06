@@ -116,7 +116,9 @@ class NeedleConversationEntity(conversation.ConversationEntity):
 
 
     def _log_utterance(self, text: str, clauses: list[str],
-                       outcomes: list[CallOutcome], speech: str) -> None:
+                       outcomes: list[CallOutcome], speech: str,
+                       started: float, engine: list[dict[str, Any]],
+                       gate: str | None = None) -> None:
         """Append one line to the household's own ruler, if it asked for one.
 
         Every number this project has was measured on a corpus it wrote itself.
@@ -130,9 +132,26 @@ class NeedleConversationEntity(conversation.ConversationEntity):
         never sent anywhere. `diagnostics` reports that it is on, and not a
         word of what is in it.
 
-        Blocking IO, so it goes to the executor like the engine does. Failures
-        are logged and swallowed: a full disk must not cost the household its
-        answer, and this file is a research instrument rather than a feature.
+        **Refusals are logged too, and they are the reason the file is worth
+        keeping.** The three gates run before inference and return without
+        ever reaching the model, so a log that only recorded answered
+        utterances would be a ruler with the gate's own mistakes cut out of it
+        - and "it ignored me" is the complaint a household actually makes.
+        `gate` names which one spoke.
+
+        **And the timings, because latency is half the question.** The engine
+        returns `prefill_tps`, `decode_tps` and `peak_ram_mb` with every turn
+        and nothing was reading them; `ms` is the wall clock for the whole
+        utterance, gates and executor included, which is what the person
+        waiting experiences. One entry per clause, because a two-order
+        sentence is two forward passes.
+
+        Blocking IO, so it goes to the executor like the engine does - but as
+        a task the entry owns rather than a future nobody holds: an untracked
+        executor job is dropped on reload and on shutdown, which loses exactly
+        the last utterances somebody was about to look at. Failures are logged
+        and swallowed: a full disk must not cost the household its answer, and
+        this file is a research instrument rather than a feature.
         """
         if not self.entry.options.get(CONF_LOG_UTTERANCES):
             return
@@ -143,7 +162,9 @@ class NeedleConversationEntity(conversation.ConversationEntity):
             "calls": [{"tool": o.tool, "ok": o.ok, "detail": o.detail}
                       for o in outcomes],
             "speech": speech,
-        }, ensure_ascii=False)
+            "ms": round((monotonic() - started) * 1000),
+            "engine": engine,
+        } | ({"gate": gate} if gate else {}), ensure_ascii=False)
         path = Path(self.hass.config.path(UTTERANCE_LOG))
 
         def _append() -> None:
@@ -151,10 +172,14 @@ class NeedleConversationEntity(conversation.ConversationEntity):
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
 
-        try:
-            self.hass.async_add_executor_job(_append)
-        except Exception:  # noqa: BLE001 - a log must never cost an answer
-            _LOGGER.exception("could not write the utterance log")
+        async def _write() -> None:
+            try:
+                await self.hass.async_add_executor_job(_append)
+            except Exception:  # noqa: BLE001 - never cost an answer
+                _LOGGER.exception("could not write the utterance log")
+
+        self.entry.async_create_task(self.hass, _write(),
+                                     "needle_assist utterance log")
 
     async def async_added_to_hass(self) -> None:
         """Keep the slot resolver's view of the house current.
@@ -257,6 +282,10 @@ class NeedleConversationEntity(conversation.ConversationEntity):
         chat_log: conversation.ChatLog,
     ) -> conversation.ConversationResult:
         """Run one utterance through the model and act on the result."""
+        # Before anything, including the gates: what the person waiting
+        # experiences is the whole turn, and the fast path is a refusal that
+        # never runs the model at all.
+        started = monotonic()
         response = intent.IntentResponse(language=user_input.language)
 
         # The answer to a "באיזה חדר" this agent asked a moment ago. Joined
@@ -286,6 +315,8 @@ class NeedleConversationEntity(conversation.ConversationEntity):
         # imperative governs nothing, and in Hebrew that is a withdrawal.
         if tool_router.looks_like_cancel(text):
             _LOGGER.debug("withdrawn before inference: %r", text)
+            self._log_utterance(text, [], [], SPEECH_CANCELLED, started, [],
+                                "cancel")
             response.async_set_speech(SPEECH_CANCELLED)
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id
@@ -306,6 +337,8 @@ class NeedleConversationEntity(conversation.ConversationEntity):
         # move a light, so it became policy rather than a preference.
         if tool_router.looks_off_topic(text):
             _LOGGER.debug("refused off-topic before inference: %r", text)
+            self._log_utterance(text, [], [], SPEECH_NOTHING, started, [],
+                                "off_topic")
             response.async_set_speech(SPEECH_NOTHING)
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id
@@ -317,6 +350,8 @@ class NeedleConversationEntity(conversation.ConversationEntity):
         # catch this. See tool_router.looks_negated.
         if tool_router.looks_negated(text):
             _LOGGER.debug("refused negated command: %r", text)
+            self._log_utterance(text, [], [], SPEECH_NOTHING, started, [],
+                                "negated")
             response.async_set_speech(SPEECH_NOTHING)
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id
@@ -345,6 +380,9 @@ class NeedleConversationEntity(conversation.ConversationEntity):
                 clauses = speaking
 
         outcomes: list[CallOutcome] = []
+        # What the engine reported about itself, one entry per clause. Read by
+        # the utterance log and by nothing else - see `_log_utterance`.
+        engine: list[dict[str, Any]] = []
         # The first engine error, kept for the spoken reply. Only reached
         # when nothing else in the sentence succeeded.
         engine_error: str | None = None
@@ -364,6 +402,8 @@ class NeedleConversationEntity(conversation.ConversationEntity):
                 outcomes.append(CallOutcome(ENGINE, False, ENGINE))
                 continue
 
+            engine.append({k: result.get(k) for k in
+                           ("prefill_tps", "decode_tps", "peak_ram_mb")})
             calls = self._runner.calls_of(result)
             confidence = float(result.get("confidence") or 0.0)
             _LOGGER.debug("%r -> %s (confidence %.3f)", clause, calls, confidence)
@@ -412,7 +452,8 @@ class NeedleConversationEntity(conversation.ConversationEntity):
         # thing; returning here keeps the rest of this function honest about
         # only ever handling calls that ran.
         if not outcomes:
-            self._log_utterance(text, clauses, outcomes, SPEECH_NOTHING)
+            self._log_utterance(text, clauses, outcomes, SPEECH_NOTHING,
+                                started, engine)
             response.async_set_speech(SPEECH_NOTHING)
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id
@@ -429,7 +470,8 @@ class NeedleConversationEntity(conversation.ConversationEntity):
             # against a threshold of three. The next turn is joined onto this
             # one and run as the single sentence it should have been.
             self._remember_pending(user_input.conversation_id, text)
-            self._log_utterance(text, clauses, outcomes, SPEECH_WHICH_ROOM)
+            self._log_utterance(text, clauses, outcomes, SPEECH_WHICH_ROOM,
+                                started, engine)
             response.async_set_speech(SPEECH_WHICH_ROOM)
             return conversation.ConversationResult(
                 response=response,
@@ -473,7 +515,8 @@ class NeedleConversationEntity(conversation.ConversationEntity):
                     )
             response.async_set_speech(answer.speech)
 
-        self._log_utterance(text, clauses, outcomes, answer.speech)
+        self._log_utterance(text, clauses, outcomes, answer.speech,
+                            started, engine)
         return conversation.ConversationResult(
             response=response, conversation_id=user_input.conversation_id
         )
