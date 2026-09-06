@@ -1978,10 +1978,6 @@ def looks_off_topic(query: str, threshold: int = REFUSE_BELOW) -> bool:
     # See :func:`asks_for_something`.
     if asks_for_something(query):
         return False
-    # And the third: a countdown is not a device either.
-    # See :func:`asks_for_a_reminder`.
-    if asks_for_a_reminder(query):
-        return False
     # And its mirror: a question about who performed something, what a thing
     # costs or how one is installed is about the world, not about this house.
     # See :data:`ASKS_ABOUT_CONTENT` and :data:`ASKS_ABOUT_THE_WORLD`.
@@ -2008,7 +2004,14 @@ def looks_off_topic(query: str, threshold: int = REFUSE_BELOW) -> bool:
         # costs nothing here and still covers the case the corpus does not
         # contain. See :func:`_sounds_like_an_order`.
         score -= _NOUN_WEIGHT
-    return score < threshold
+    if score >= threshold:
+        return False
+    # About to refuse, and one order still has no device noun to score: a
+    # countdown. Asked here rather than beside the other two exceptions
+    # because it runs the router, and on the path that passes this gate the
+    # router runs again a moment later anyway - so it is asked only where the
+    # answer would otherwise be "no". See :func:`asks_for_a_reminder`.
+    return not asks_for_a_reminder(query)
 
 
 def clause_names_nothing(clause: str) -> bool:
