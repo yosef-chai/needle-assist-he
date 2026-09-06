@@ -133,14 +133,23 @@ async def test_an_entry_from_the_future_is_refused_rather_than_guessed_at(
 async def test_changing_an_option_reloads_the_engine(
     hass: HomeAssistant, loaded_runner: Any, entry: ConfigEntry
 ) -> None:
-    """The engine binds its tool set at init, so an option change has to reload."""
+    """The engine binds its tool set at init, so an option change has to reload.
+
+    Through the options flow rather than by writing the entry directly: Home
+    Assistant's own `OptionsFlowWithReload` does the reloading now, and an
+    update listener of our own would be four lines that can go out of step
+    with it. Driving the flow is also what a household actually does.
+    """
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     before = loaded_runner.call_count
 
-    hass.config_entries.async_update_entry(entry, options={"max_new_tokens": 256})
+    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    await hass.config_entries.options.async_configure(
+        flow["flow_id"], {"max_new_tokens": 256})
     await hass.async_block_till_done()
 
+    assert entry.options["max_new_tokens"] == 256
     assert loaded_runner.call_count > before
 
 

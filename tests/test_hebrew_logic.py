@@ -3474,3 +3474,125 @@ def test_asking_when_a_countdown_ends_does_not_start_one():
         "timer_start", {}, "נו מתי הטיימר נגמר", True,
         ROUTER.names_a_timer("נו מתי הטיימר נגמר"))
     assert settled == "timer_status"
+
+
+# ---------------------------------------------------------------------------
+# `repair`: one chain for the harness and the household, and what it does with
+# a generation the engine could not finish. See the workshop tree's
+# `eval/test_integration_logic.py`, where these are written.
+# ---------------------------------------------------------------------------
+
+REPAIR = load("repair")
+
+
+def test_the_noun_settles_the_family_before_the_verb_settles_the_pair():
+    """"תסגור את המצלמה" switches a camera off, not on.
+
+    `direction.family_named` answers with the family's *anchor*, so it throws
+    the direction away: run after `direction.settle`, a sentence saying סגור
+    that the model answered with a cover came back as `camera_turn_on`. Eleven
+    rows of the frozen benchmark, eight cameras and three fans, every one
+    scored correct by the evaluation harness and wrong by the house.
+    """
+    for query, expected in (
+            ("תסגור את המצלמות בגינה", "camera_turn_off"),
+            ("תסגרי את הפן בשירותים", "fan_turn_off"),
+            ("תפתח את המצלמה בסלון", "camera_turn_on"),
+    ):
+        tool, _ = REPAIR.settle("cover_control", {"action": "close"}, query)
+        assert tool == expected, f"{query!r} -> {tool}"
+
+
+def test_a_failed_generation_is_rebuilt_only_where_nothing_was_in_doubt():
+    """An engine failure is not a refusal, and the scope is the argument.
+
+    The router offered exactly one tool, so there was nothing to choose, and
+    that tool cannot move anything. Measured per clause over the corpus behind
+    the pre-inference gates: 2,252 agree, 2 disagree.
+    """
+    assert REPAIR.recover("האם המתגים מכובים בחדר המוגן") == {
+        "name": "get_state", "arguments": {"domain": "switch", "state": "off"}}
+
+    # One tool, but it moves something.
+    assert REPAIR.recover("תדליק את האור בסלון") is None
+    # A question this cannot type is a question it cannot answer: `domain` is
+    # required and nothing may be invented for it.
+    assert REPAIR.recover("מה קורה") is None
+    # Off-topic sentences get a wide shortlist, which is the property that
+    # makes the narrow scope safe rather than merely cautious.
+    for query in ("רגע, מי כתב את הספר מלחמה ושלום תודה",
+                  "אה, שלח הודעה לדני בוואטסאפ"):
+        assert REPAIR.recover(query) is None, query
+
+
+def test_the_verb_says_who_hears_a_message():
+    """451 agree and none disagree over the corpus.
+
+    The line is at the verb and not at the audience: "תשלח הודעה לכולם" is a
+    notification *to everyone*, so reading the audience first is 31 clauses of
+    330 wrong.
+    """
+    for query, expected in (
+            ("תכריז בכל הבית שהאוכל מוכן", "broadcast"),
+            ("תשדר ברמקולים שהכביסה מוכנה", "broadcast"),
+            ("הכרז שתרדו למטה", "broadcast"),
+            ("תודיע לכולם שהאוכל מוכן", "broadcast"),
+            ("תשלח הודעה לכולם שתרדו למטה", "notify_send"),
+            ("תעדכן את כולם שיוצא מהבית", "notify_send"),
+            ("תודיע בבית שהאוכל מוכן", "notify_send"),
+    ):
+        for started_as in ("notify_send", "broadcast"):
+            tool, _ = REPAIR.settle(started_as, {}, query)
+            assert tool == expected, f"{query!r} from {started_as} -> {tool}"
+
+
+def test_the_message_verbs_reach_the_plain_imperative():
+    """`הכרז שהכביסה מוכנה` used to extract nothing, so it was refused."""
+    assert SLOT.extract_message("הכרז שהכביסה מוכנה") == "הכביסה מוכנה"
+    assert SLOT.extract_message("תעדכן את כולם שיוצא מהבית") == "יוצא מהבית"
+    assert SLOT.extract_message("שלח הודעה לכולם שבואו לאכול") == "בואו לאכול"
+
+
+def test_an_automation_is_named_after_what_it_does():
+    """Which is why the family vote cannot read the one family stated outright.
+
+    "האוטומציה תריסים בבוקר" names blinds and an automation, so
+    `tool_router.family_named` sees two and answers None. 1,172 agree and 3
+    disagree over the corpus.
+    """
+    for query, expected in (
+            ("תשמע, תכבה את האוטומציה תריסים בבוקר", "automation_turn_off"),
+            ("תפעיל את האוטומציה אורות בלילה", "automation_turn_on"),
+            ("תפעיל את הסצנה ערב", "scene_activate"),
+            ("תריץ את הסקריפט בוקר טוב", "script_run"),
+    ):
+        for started_as, args in (("cover_control", {"action": "open"}),
+                                 ("light_control", {"action": "on"})):
+            tool, _ = REPAIR.settle(started_as, dict(args), query)
+            assert tool == expected, f"{query!r} from {started_as} -> {tool}"
+
+
+def test_a_routine_verb_alone_does_not_pull_the_family_in():
+    """`לחצי` is both "press" and "to a half", and a volume is not a button."""
+    tool, _ = REPAIR.settle("media_control", {"action": "volume"},
+                            "תכוון את הסאונד בכניסה לבית לחצי")
+    assert tool == "media_set_volume", tool
+
+
+def test_di_is_an_intensifier_and_not_an_order():
+    """It sat in the media hints, so it was cut off and thrown away.
+
+    "די, תעצור בפינת אוכל" came apart into "די" - which names nothing and is
+    dropped - and "תעצור בפינת אוכל", which is a pause. Four sentences of
+    44,043 cut differently without it and all four are that shape.
+    """
+    assert CLAUSE.split_clauses("די, תעצור בפינת אוכל תודה") == [
+        "די, תעצור בפינת אוכל תודה"]
+    for query in ("די, תעצור בפינת אוכל תודה",
+                  "תקשיב, די, תעצור בחדר של הקטנה תודה"):
+        tool, _ = REPAIR.settle("media_control", {"action": "pause"}, query)
+        assert tool == "media_stop", f"{query!r} -> {tool}"
+    # And alone it is still a pause: 111 clauses of "די עם את המוזיקה".
+    for query in ("די עם את המוזיקה בחדר ילדים", "תעצור את המוזיקה בסלון"):
+        tool, _ = REPAIR.settle("media_control", {"action": "pause"}, query)
+        assert tool == "media_pause", f"{query!r} -> {tool}"

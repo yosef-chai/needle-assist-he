@@ -36,7 +36,7 @@ _warned = False
 
 
 def safe_complete(agent: Any, text: str,
-                  max_new_tokens: int = 192) -> dict[str, Any]:
+                  max_new_tokens: int = 320) -> dict[str, Any]:
     """One turn, surviving truncated multi-byte characters in the response."""
     global _warned  # noqa: PLW0603 - one debug line, once per process
     # The vendored engine, not the installed `cactus-needle`. Home Assistant has

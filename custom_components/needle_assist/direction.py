@@ -149,6 +149,7 @@ the same drop and still reads one disagreement, and one is not zero.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Final
 
 from .clause_split import CORRECTION
@@ -533,6 +534,47 @@ DISCRIMINATING_WEAK: Final[dict[str, tuple[str, ...]]] = {
 #: and "תפעיל את זה" names nothing at all, so the model's own answer is the
 #: better one. **Not one of the 194 says any of these**, so the guard is free.
 _NAMES_NOTHING: Final[tuple[str, ...]] = ("זה", "זאת", "אותו", "אותה")
+
+
+#: The routine nouns, and only the nouns. :data:`DISCRIMINATING` separates the
+#: four siblings once the model has already answered inside the family;
+#: :func:`settle_routine_noun` uses this to pull it *into* the family, which is
+#: a stronger claim and takes the stricter table.
+#:
+#: A noun names the family. A verb only says which behaviour inside it, so
+#: `הרץ`, `תריץ`, `תלחץ` and `לחץ` stay out: `לחצי` is both "press" and "to a
+#: half", and "תכוון את הסאונד לחצי" is a volume. That one row is the whole
+#: difference between this table and its parent.
+#:
+#: Why it is needed at all: `family_named` answers ``None`` when a sentence
+#: names two families, and an automation is *named after what it does* -
+#: "האוטומציה תריסים בבוקר" says blinds, "האוטומציה אורות בלילה" says lights.
+#: So the one shape where the family is stated outright was the one shape the
+#: family rule could not read, and the model's cover or light answer stood.
+#: `tool_router.family_named`'s own docstring claimed the opposite.
+#:
+#: Measured per clause over the whole corpus, against the gold behaviour and
+#: not merely the gold family: **1,172 agree, 3 disagree**. All three are the
+#: speech noise :data:`DISCRIMINATING` already names - תכוה, תשבית, שטבטל -
+#: where the noun is read and the negative verb is not.
+ROUTINE_NOUNS: Final[dict[str, tuple[str, ...]]] = {
+    "scene_activate": ("סצנה", "סצינה", "סצנת", "תרחיש", "אווירה", "אווירת"),
+    "script_run": ("סקריפט",),
+    "automation_turn_on": ("אוטומציה", "אוטומציות"),
+    "button_press": ("כפתור", "הכפתור"),
+}
+
+
+def settle_routine_noun(tool: str, text: str) -> str:
+    """A clause that names a routine outright is one, whatever else it names."""
+    if not text:
+        return tool
+    tokens = _tokens(text)
+    named = [name for name, words in ROUTINE_NOUNS.items()
+             if _hits(list(words), tokens, text)]
+    if len(named) != 1:
+        return tool
+    return settle(named[0], text)
 
 
 def settle_action(tool: str, siblings: list[str], text: str) -> str:
@@ -1472,6 +1514,67 @@ TRANSPORT_ONLY: Final[tuple[str, ...]] = (
     "media_next_track", "media_previous_track")
 
 
+#: Announce it to the house, or send it to a phone. The two message tools take
+#: the same single argument and differ only in who hears it, which the model
+#: gets wrong in both directions and the verb never does.
+#:
+#: The corpus draws the line at the verb, not at the audience, and the
+#: distinction is finer than it looks: ``תשלח הודעה לכולם`` is a notification
+#: *to everyone* and ``תודיע לכולם`` is an announcement, so a rule reading
+#: `לכולם` first gets 31 rows of 330 wrong. The verb is read first and the
+#: audience only breaks the tie a bare ``תודיע`` leaves.
+_ANNOUNCE: Final = re.compile(
+    r"(?:^|\s)(?:ו)?(?:כש|ש)?(?:[בלכמ])?(?:ה)?"
+    r"(?:תכריז|תכריזי|הכרז|הכריזי|להכריז|תשדר|תשדרי|שדר|שדרי|לשדר)(?:\s|$)")
+_SEND: Final = re.compile(
+    r"(?:^|\s)(?:ו)?(?:כש|ש)?(?:[בלכמ])?(?:ה)?"
+    r"(?:תשלח|תשלחי|שלח|שלחי|לשלוח|תעדכן|תעדכני|עדכן|עדכני|לעדכן)(?:\s|$)")
+#: Where a bare "tell them" is aimed: the whole house at once.
+_EVERYONE: Final = re.compile(r"לכולם|בכל\s+הבית|ברמקולים")
+#: And its opposite, which is a notification to the household rather than an
+#: announcement over it. Checked before `_EVERYONE` and only when that is
+#: silent, because "בכל הבית" contains "בבית". Silence falls from 83 clauses to
+#: 7 with it, at no disagreements either way.
+_HOUSEHOLD: Final = re.compile(r"בבית(?:\s|$)")
+
+#: The pair this settles. Both take one argument and the executor reads it off
+#: the sentence for either, so only the audience is ever in doubt.
+AUDIENCE: Final = frozenset(("notify_send", "broadcast"))
+
+
+def settle_audience(tool: str, text: str, has_message: bool) -> str:
+    """Announce to the house, or notify a device. The verb says which.
+
+    ``has_message`` is the caller's answer to "does this clause carry
+    something to say at all" - :func:`slot_match.extract_message`, passed in so
+    this module keeps depending on the vocabulary modules for nothing, the same
+    arrangement as :func:`family_named`. It is not a formality: without it
+    ``בכל הבית`` reads a vacuum told to clean everywhere as an announcement,
+    which is 158 rows of exactly the disagreement this bar forbids.
+
+    Measured per clause over the whole corpus, on the 458 clauses whose gold is
+    one of the two: **451 agree, 0 disagree, 7 silent**, and on the clauses
+    whose whole shortlist is the pair - the set `repair.recover` sees - 388
+    agree, 0 disagree, 4 silent. Of the off-topic rows that reach the model at
+    all, this speaks on **none**.
+    """
+    # An empty ``tool`` asks the question outright - "which of the two does
+    # this sentence want, if it says at all" - and gets "" back when it does
+    # not. `repair.recover` needs that, because there is no model answer to
+    # fall back on when the generation is the thing that broke.
+    if (tool and tool not in AUDIENCE) or not text or not has_message:
+        return tool
+    if _SEND.search(text):
+        return "notify_send"
+    if _ANNOUNCE.search(text):
+        return "broadcast"
+    if _EVERYONE.search(text):
+        return "broadcast"
+    if _HOUSEHOLD.search(text):
+        return "notify_send"
+    return tool
+
+
 def settle_transport(tool: str, text: str, names_something: bool) -> str:
     """``music_play`` about a sentence that named nothing to play."""
     if tool != "music_play" or names_something or not text:
@@ -1547,7 +1650,15 @@ _M_INPUT: Final = ("ערוץ", "מקור", "רדיו", "תחליף", "תחליפ
 _M_VOLUME_VERB: Final = ("תגביר", "תנמיך", "הגבר", "נמיך", "תחליש",
                          "הגבירי", "תנמיכי", "הנמיכי", "תרים", "תוריד")
 _M_VOLUME_NOUN: Final = ("ווליום", "וליום", "קול", "עוצמה", "סאונד", "שאונד")
+# `די` is not here: on its own it is a pause - 111 corpus clauses of
+# "די עם את המוזיקה" and every one of them - and it is only *with* an
+# explicit stop verb that it means stop outright. `_M_DI_STOP` reads the
+# pair; 19 clauses on the v11 corpus, all `media_stop`, none against.
 _M_STOP: Final = ("סטופ", "לגמרי")
+_M_DI: Final = re.compile(r"(?:^|\s)די(?:\s|,|$)")
+_M_STOP_VERB: Final = re.compile(
+    r"(?:^|\s)(?:ו)?(?:כש|ש)?(?:[בלכמ])?(?:ה)?"
+    r"(?:תעצור|תעצרי|עצור|עצרי|לעצור)(?:\s|$)")
 _M_PAUSE: Final = ("השהה", "תשהה", "השהי", "תשהי", "עצור", "תעצור", "עצרי",
                    "תעצרי", "הפסק", "תפסיק", "הפסיקי", "תפסיקי", "די",
                    "לעצור", "להפסיק", "להשהות")
@@ -1631,6 +1742,11 @@ def settle_media(tool: str, text: str, names_a_level: bool,
     sets_a_level = (which_way(text) is not None
                     and step_size(text, "volume_step_pct") is not None)
 
+    # "די" and a stop verb together, which is the one phrasing that settles
+    # halting - see the `_HALT` guard at the end, which this is the exception
+    # to. 19 clauses on the v11 corpus, all `media_stop`, none against.
+    di_stop = bool(_M_DI.search(text) and _M_STOP_VERB.search(text))
+
     if said(_M_NEXT):
         found = "media_next_track"
     elif said(_M_BACK):
@@ -1654,7 +1770,7 @@ def settle_media(tool: str, text: str, names_a_level: bool,
         # every media clause: **721 agree, 1 disagree**, the one being "מיות" -
         # speech noise inside the word the branch above matches on.
         found = "media_set_volume"
-    elif said(_M_STOP):
+    elif said(_M_STOP) or di_stop:
         found = "media_stop"
     elif said(_M_PAUSE):
         found = "media_pause"
@@ -1675,7 +1791,11 @@ def settle_media(tool: str, text: str, names_a_level: bool,
         found = "media_play"
     else:
         return tool
-    # Halting is one decision, and the sentence does not make it.
-    if found in _HALT and tool in _HALT:
+    # Halting is one decision, and the sentence does not make it - except in
+    # the one phrasing where it does. "די" is enough on its own to mean *stop
+    # asking*, and next to an explicit stop verb it separates the two halting
+    # behaviours the rest of this function cannot. Everywhere else the model's
+    # answer stands, which is why "תעצור את המוזיקה" is still a pause.
+    if found in _HALT and tool in _HALT and not di_stop:
         return tool
     return found

@@ -29,6 +29,7 @@ unbounded.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import threading
@@ -51,6 +52,7 @@ class NeedleRunner:
     def __init__(self, weights: str | None = None,
                  config_path: str | None = None) -> None:
         self._weights = weights
+        self._weights_id: str | None = None
         self._config_path = config_path
         self._agents: dict[tuple[str, ...], Any] = {}
         self._needle: Any = None
@@ -92,6 +94,13 @@ class NeedleRunner:
         from . import needle_engine as needle  # noqa: PLC0415
 
         self._needle = needle
+        if self._weights:
+            # Once, here, off the event loop: the file is 23 MB.
+            digest = hashlib.md5(usedforsecurity=False)
+            with open(self._weights, "rb") as handle:
+                for chunk in iter(lambda: handle.read(1 << 20), b""):
+                    digest.update(chunk)
+            self._weights_id = digest.hexdigest()[:8]
         # Build the fallback shortlist now so a first utterance does not pay
         # for the engine's initial load.
         self._agent_for(tool_router.FALLBACK[:tool_router.MAX_TOOLS])
@@ -117,6 +126,20 @@ class NeedleRunner:
     # pathological input stream, not an expected condition.
     _MAX_CACHED_AGENTS = 64
 
+    @property
+    def weights_id(self) -> str:
+        """A short digest of the adapter that is loaded.
+
+        The catalogue and the weights ship together and a mismatch is a total
+        failure rather than a degraded one, so the device page says which
+        adapter is running and not only which engine. A digest rather than a
+        file name because a household renames files and this project compares
+        adapters by exactly this - `ba144978` is v11.
+
+        Read once, at load, so nothing hashes 23 MB on the event loop.
+        """
+        return self._weights_id or "base"
+
     def _agent_for(self, names: list[str]) -> Any:
         """Agent bound to exactly these tools, cached by shortlist."""
         key = tuple(names)
@@ -137,7 +160,7 @@ class NeedleRunner:
         self._agents[key] = agent
         return agent
 
-    def complete(self, text: str, max_new_tokens: int = 192) -> dict[str, Any]:
+    def complete(self, text: str, max_new_tokens: int = 320) -> dict[str, Any]:
         """One turn. Returns Needle's response dict. Blocking."""
         if self._needle is None:
             raise RuntimeError("NeedleRunner.load() was not called")

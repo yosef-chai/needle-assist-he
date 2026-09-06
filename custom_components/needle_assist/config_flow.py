@@ -31,10 +31,11 @@ from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
-    OptionsFlow,
+    OptionsFlowWithReload,
 )
 from homeassistant.core import callback
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     EntitySelector,
     EntitySelectorConfig,
     NumberSelector,
@@ -44,6 +45,7 @@ from homeassistant.helpers.selector import (
 
 from .const import (
     BUNDLED_WEIGHTS,
+    CONF_LOG_UTTERANCES,
     CONF_MAX_TOKENS,
     CONF_MUSIC_PLAYER,
     CONF_WEIGHTS,
@@ -145,12 +147,21 @@ class NeedleAssistConfigFlow(ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+    def async_get_options_flow(
+        config_entry: ConfigEntry,
+    ) -> NeedleAssistOptionsFlow:
         return NeedleAssistOptionsFlow()
 
 
-class NeedleAssistOptionsFlow(OptionsFlow):
-    """The two settings a household knows better than the measurements do."""
+class NeedleAssistOptionsFlow(OptionsFlowWithReload):
+    """The settings a household knows better than the measurements do.
+
+    `OptionsFlowWithReload` rather than `OptionsFlow` and an update listener of
+    our own: the engine binds its tool set when it is initialised, so a changed
+    option has to reload the entry, and Home Assistant has done that itself
+    since 2025.8. The listener it replaces was four lines that could go out of
+    step with the flow.
+    """
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -181,5 +192,13 @@ class NeedleAssistOptionsFlow(OptionsFlow):
                 NumberSelectorConfig(min=32, max=512, step=8,
                                      mode=NumberSelectorMode.SLIDER)
             ),
+            # Off by default, and the only setting here that is not about how
+            # the assistant behaves. Every number this project has was measured
+            # on a corpus it wrote itself; what this house actually says is the
+            # one ruler that is not, and it cannot be collected without asking.
+            vol.Optional(
+                CONF_LOG_UTTERANCES,
+                default=options.get(CONF_LOG_UTTERANCES, False),
+            ): BooleanSelector(),
         })
         return self.async_show_form(step_id="init", data_schema=schema)

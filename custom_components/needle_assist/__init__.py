@@ -46,10 +46,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: NeedleConfigEntry) -> bo
             hass,
             DOMAIN,
             ISSUE_WEIGHTS_MISSING,
-            is_fixable=False,
+            is_fixable=True,
             severity=ir.IssueSeverity.ERROR,
             translation_key=ISSUE_WEIGHTS_MISSING,
             translation_placeholders={"path": weights},
+            data={"path": weights},
         )
         raise ConfigEntryNotReady(f"configured weights file is missing: {weights}")
 
@@ -79,7 +80,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: NeedleConfigEntry) -> bo
 
     entry.runtime_data = runner
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    entry.async_on_unload(entry.add_update_listener(_async_reload))
     return True
 
 
@@ -160,8 +160,3 @@ async def async_remove_entry(hass: HomeAssistant, entry: NeedleConfigEntry) -> N
 
     if removed:
         _LOGGER.info("removed the downloaded Needle engine at %s", removed)
-
-
-async def _async_reload(hass: HomeAssistant, entry: NeedleConfigEntry) -> None:
-    """Reload when options change - the engine binds its toolset at init."""
-    await hass.config_entries.async_reload(entry.entry_id)

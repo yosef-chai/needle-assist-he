@@ -11,7 +11,10 @@ Everything runs on the local machine. No network call is made at any point.
 
 from __future__ import annotations
 
+import json
 import logging
+from datetime import UTC, datetime
+from pathlib import Path
 from time import monotonic
 from typing import TYPE_CHECKING, Any, Final, Literal
 
@@ -32,8 +35,9 @@ from homeassistant.helpers import (
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import clause_split, reply, slot_match, tool_router
+from . import clause_split, repair, reply, slot_match, tool_router
 from .const import (
+    CONF_LOG_UTTERANCES,
     CONF_MAX_TOKENS,
     CONFIDENCE_FLOOR,
     DEFAULT_MAX_TOKENS,
@@ -43,6 +47,7 @@ from .const import (
     SPEECH_CANCELLED,
     SPEECH_NOTHING,
     SPEECH_WHICH_ROOM,
+    UTTERANCE_LOG,
 )
 from .executor import CallExecutor, CallOutcome
 from .needle_engine.agent import fetch
@@ -99,9 +104,57 @@ class NeedleConversationEntity(conversation.ConversationEntity):
             entry_type=DeviceEntryType.SERVICE,
             manufacturer="Needle Assist",
             model="Needle 2, Hebrew adapter",
+            # Which adapter, not merely which engine. The two ship together and
+            # a mismatch is a total failure rather than a degraded one - a v10
+            # `.cact` against a v11 catalogue emits names the catalogue no
+            # longer has - so the device page says both. The digest is what
+            # this project actually compares adapters by.
+            model_id=self._runner.weights_id,
             name="Needle Assist",
             sw_version=fetch.ENGINE_VERSION,
         )
+
+
+    def _log_utterance(self, text: str, clauses: list[str],
+                       outcomes: list[CallOutcome], speech: str) -> None:
+        """Append one line to the household's own ruler, if it asked for one.
+
+        Every number this project has was measured on a corpus it wrote itself.
+        A template holdout is not generalisation - the same adapter reads 90%
+        on "rows it has not seen" and 43% on rows whose *template* it has not
+        seen - and 17% of the frozen benchmark has a filler-variant twin in
+        training. What the house actually says is the one ruler that is not
+        like that, and it cannot be collected without asking.
+
+        So: off by default, written under the configuration directory, and
+        never sent anywhere. `diagnostics` reports that it is on, and not a
+        word of what is in it.
+
+        Blocking IO, so it goes to the executor like the engine does. Failures
+        are logged and swallowed: a full disk must not cost the household its
+        answer, and this file is a research instrument rather than a feature.
+        """
+        if not self.entry.options.get(CONF_LOG_UTTERANCES):
+            return
+        line = json.dumps({
+            "at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "text": text,
+            "clauses": clauses,
+            "calls": [{"tool": o.tool, "ok": o.ok, "detail": o.detail}
+                      for o in outcomes],
+            "speech": speech,
+        }, ensure_ascii=False)
+        path = Path(self.hass.config.path(UTTERANCE_LOG))
+
+        def _append() -> None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(line + "\n")
+
+        try:
+            self.hass.async_add_executor_job(_append)
+        except Exception:  # noqa: BLE001 - a log must never cost an answer
+            _LOGGER.exception("could not write the utterance log")
 
     async def async_added_to_hass(self) -> None:
         """Keep the slot resolver's view of the house current.
@@ -320,9 +373,17 @@ class NeedleConversationEntity(conversation.ConversationEntity):
             # apart.
             if (failure := self._runner.failed(result)) is not None:
                 _LOGGER.error("engine failure on %r: %s", clause, failure)
-                engine_error = engine_error or str(failure)
-                outcomes.append(CallOutcome(ENGINE, False, ENGINE))
-                continue
+                # But a failure is not a refusal, and where the router offered
+                # exactly one tool and that tool only reads, the sentence can
+                # still be answered without the model. See `repair.recover`.
+                if (rebuilt := repair.recover(clause)) is not None:
+                    _LOGGER.info("rebuilt %r from the sentence after an "
+                                 "engine failure", clause)
+                    calls = [rebuilt]
+                else:
+                    engine_error = engine_error or str(failure)
+                    outcomes.append(CallOutcome(ENGINE, False, ENGINE))
+                    continue
 
             # Off by default: the confidence head is not updated by fine-tuning
             # and reads 0.0 on correct non-English calls. See
@@ -351,6 +412,7 @@ class NeedleConversationEntity(conversation.ConversationEntity):
         # thing; returning here keeps the rest of this function honest about
         # only ever handling calls that ran.
         if not outcomes:
+            self._log_utterance(text, clauses, outcomes, SPEECH_NOTHING)
             response.async_set_speech(SPEECH_NOTHING)
             return conversation.ConversationResult(
                 response=response, conversation_id=user_input.conversation_id
@@ -367,6 +429,7 @@ class NeedleConversationEntity(conversation.ConversationEntity):
             # against a threshold of three. The next turn is joined onto this
             # one and run as the single sentence it should have been.
             self._remember_pending(user_input.conversation_id, text)
+            self._log_utterance(text, clauses, outcomes, SPEECH_WHICH_ROOM)
             response.async_set_speech(SPEECH_WHICH_ROOM)
             return conversation.ConversationResult(
                 response=response,
@@ -410,6 +473,7 @@ class NeedleConversationEntity(conversation.ConversationEntity):
                     )
             response.async_set_speech(answer.speech)
 
+        self._log_utterance(text, clauses, outcomes, answer.speech)
         return conversation.ConversationResult(
             response=response, conversation_id=user_input.conversation_id
         )

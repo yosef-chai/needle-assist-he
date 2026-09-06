@@ -18,6 +18,7 @@ DOMAIN: Final = "needle_assist"
 BUNDLED_WEIGHTS: Final = Path(__file__).parent / "needle_he.cact"
 
 CONF_WEIGHTS: Final = "weights_path"
+CONF_LOG_UTTERANCES: Final = "log_utterances"
 CONF_MAX_TOKENS: Final = "max_new_tokens"
 
 # The shape of what the config entry stores. Version 2 removed two options, so
@@ -49,7 +50,19 @@ ISSUE_WEIGHTS_MISSING: Final = "weights_file_missing"
 # is "the" speaker.
 CONF_MUSIC_PLAYER: Final = "music_player"
 
-DEFAULT_MAX_TOKENS: Final = 192
+#: Where the utterance log goes, under Home Assistant's configuration
+#: directory. Off by default and never sent anywhere: every number this
+#: project has is measured on a corpus it wrote itself, and what the household
+#: actually says is the one ruler that is not.
+UTTERANCE_LOG: Final = "needle_assist/utterances.jsonl"
+
+#: Raised from 192 after the truncation study. A tool call is about 25 tokens,
+#: but a Hebrew `message` is written as `\uXXXX` escapes in the model's own
+#: training targets - six ASCII characters per letter - so an announcement of a
+#: dozen words really does need the room. It buys three of the thirty-nine rows
+#: that truncate; `repair.recover` answers the rest, and nothing else pays for
+#: it because decoding stops at the end of the grammar either way.
+DEFAULT_MAX_TOKENS: Final = 320
 
 # Confidence gating is off, and that is policy rather than a default.
 #

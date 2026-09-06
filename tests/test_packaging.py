@@ -66,7 +66,10 @@ def test_the_hebrew_strings_keep_their_direction_marks():
 
     assert lrm not in raw and rlm not in raw
     assert backslash + "u200e" in raw
-    assert hebrew["config"]["error"]["weights_not_cact"].count(lrm) == 3
+    # One per left-to-right run, and that sentence names four: the two file
+    # extensions and the command, which needs one at each end because Hebrew
+    # continues after it.
+    assert hebrew["config"]["error"]["weights_not_cact"].count(lrm) == 4
     assert hebrew["issues"]["weights_file_missing"]["title"].startswith(rlm)
 
 

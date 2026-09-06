@@ -33,6 +33,7 @@ from .clause_split import MAX_CLAUSES
 from .const import (
     BUNDLED_WEIGHTS,
     CALL_OF,
+    CONF_LOG_UTTERANCES,
     CONF_MUSIC_PLAYER,
     MUSIC_INTEGRATION,
 )
@@ -119,6 +120,9 @@ async def async_get_config_entry_diagnostics(
         },
         # The deterministic gates, so a "why did it refuse that" question can
         # be answered without a debug log.
+        # Whether the household's own log is running, and not one word of
+        # what is in it. See `conversation._log_utterance`.
+        "utterance_log": entry.options.get(CONF_LOG_UTTERANCES, False),
         "gates": {
             "off_topic_threshold": tool_router.REFUSE_BELOW,
             "room_weight": tool_router.ROOM_WEIGHT,

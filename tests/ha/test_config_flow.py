@@ -21,6 +21,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 
 from custom_components.needle_assist.const import (
+    CONF_LOG_UTTERANCES,
     CONF_MAX_TOKENS,
     CONF_MUSIC_PLAYER,
     CONF_WEIGHTS,
@@ -190,17 +191,23 @@ async def test_reconfigure_refuses_a_path_that_is_not_there(
 # -- options ------------------------------------------------------------------
 
 
-async def test_the_options_dialog_offers_two_settings_and_only_two(
+async def test_the_options_dialog_offers_three_settings_and_only_three(
     hass: HomeAssistant, loaded_runner: Any, entry: ConfigEntry
 ) -> None:
-    """The confidence floor and the off-topic gate are policy, not preferences."""
+    """The confidence floor and the off-topic gate are policy, not preferences.
+
+    A setting belongs here only if a household can answer it better than a
+    measurement can. Two are about how the assistant behaves; the third asks
+    permission to keep a log of what was said, which no measurement can decide
+    on the household's behalf.
+    """
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] is FlowResultType.FORM
     offered = {str(key) for key in result["data_schema"].schema}
-    assert offered == {CONF_MUSIC_PLAYER, CONF_MAX_TOKENS}
+    assert offered == {CONF_MUSIC_PLAYER, CONF_MAX_TOKENS, CONF_LOG_UTTERANCES}
 
 
 async def test_the_two_settings_are_saved(

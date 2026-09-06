@@ -9,7 +9,7 @@
 #
 #   ruff check custom_components/needle_assist          - clean
 #   mypy custom_components/needle_assist                - clean, --strict
-#   pytest tests --cov                                  - 237 passed, 95%
+#   pytest tests --cov                                  - 240 passed, 95%
 #   pytest tests/ha/test_config_flow.py --cov=...config_flow  - 100%
 #
 # One thing the scale has no rule for, recorded because it is asked about:
@@ -208,8 +208,11 @@ rules:
   repair-issues:
     status: done
     comment: One issue, `weights_file_missing`, raised when a configured model
-      file has gone. Retrying cannot bring it back, so it asks the household to
-      reconfigure and names the file; it clears itself when setup succeeds.
+      file has gone. Retrying cannot bring it back, so it is fixable rather
+      than informational - `repairs.py` puts the entry back on the bundled
+      model in one click, which is the answer in nearly every case because the
+      path was typed once, before the release layout bundled a model. It clears
+      itself when setup succeeds.
   stale-devices:
     status: exempt
     comment: The single service device belongs to the entry and goes with it.

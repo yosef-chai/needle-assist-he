@@ -73,3 +73,40 @@ re-applied by hand on every upgrade, which is how vendored code rots.
    native library and every exported `.cact` have to be rebuilt - the archive
    format is tied to the engine version, and `Needle._bind` raises a fairly
    clear error when they disagree.
+
+## Why this is still 2.0.5, checked against 2.0.12
+
+Measured 2026-09-06, because the package is now eight releases ahead.
+
+`needle/model/export.py` is **byte-identical** between the two, so `needle
+build` writes the same archive and the `.cact` format has not moved. What did
+move is the native library the archive is read by: `ENGINE_VERSION` is a map
+now, and generation 2 points at `2.0.4` rather than `2.0.2`.
+
+So the whole question is whether the newer engine answers differently, and it
+does not. The shipping v11 `.cact` was loaded under both and asked 120 rows of
+the frozen benchmark:
+
+| | engine 2.0.2 | engine 2.0.4 |
+|---|---:|---:|
+| answered | 118 | 118 |
+| engine failures | 2 | 2 |
+| **answers that differ** | | **0** |
+
+Upstream's own changes in that range are real but not ours: the constraint
+preservation on optional fields and the integer-enum inference are in
+`agent/tools.py`'s schema *builder*, which turns decorated Python functions
+into schemas. This component passes the raw JSON schema out of `tools.json`
+and never calls it.
+
+Against zero measurable gain, the upgrade costs a re-vendor of three changed
+files (297 lines in `__init__.py` alone, where `complete` gained telemetry and
+a generation dispatch that `needle_compat.safe_complete` re-implements), a new
+library download for every household, and a release. Left at 2.0.5.
+
+One change there **would** matter and is a reason to look again before any
+retrain: `render_example` moved to `ensure_ascii=False` and put newlines around
+the think block. That changes the supervised target - a Hebrew argument value
+stops costing six ASCII characters per letter - and it is the defect behind the
+truncation study in `repair.recover`. `finetune_he.load_shaped` asserts
+byte-identity with the installed renderer, so the assert is what will say so.

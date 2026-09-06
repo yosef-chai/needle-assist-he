@@ -62,36 +62,25 @@ from homeassistant.helpers import (
 )
 from homeassistant.util import dt as dt_util
 
-from . import direction, slot_match, tool_router
+from . import repair, slot_match, tool_router
 from .const import (
     ACTION_ARG,
-    ACTIONS,
     ALL_WHEN_UNNAMED,
-    BOOLEAN_SLOT,
-    CALL_OF,
     CONF_MUSIC_PLAYER,
     DEVICE_CLASS_DOMAINS,
-    DURATION_TOOLS,
     FALLBACK_DOMAINS,
     HEBREW_MONTHS,
-    HELPER_IS_A_TIMER,
-    INTEGER_SETTING,
     LIST_INTEGRATIONS,
     LIST_ITEM_KEY,
-    MEDIA_TOOLS,
     MUSIC_INTEGRATION,
     NAME_ADDRESSED,
     NON_SERVICE_ARGS,
-    NUMBER_SLOT,
     QUERY_TOOLS,
     ROOM_MEMORY_SECONDS,
     ROUTINE_SIBLING,
     SERVICE_MAP,
-    SETTING_SLOT,
-    STEP_SOURCE,
     TOOL_ARGS,
     TOOL_DOMAIN,
-    VIRTUAL_OF,
     WEATHER_STATES_HE,
 )
 from .hebrew_text import normalise
@@ -387,21 +376,11 @@ class CallExecutor:
             if k not in NON_SERVICE_ARGS and k in allowed
         }
 
-        # Slots the sentence names outright. These come first and stand apart
-        # from the arithmetic below, because they are not a translation of the
-        # model's answer - they replace it. See `slot_match.SETTING_WORDS`.
-        # The speaker said "שקט" or "גבוה", and which of the enum's values
-        # that is does not need a model: 474 right and 0 wrong.
-        # A tuple since v11: one behaviour can carry more than one such slot.
-        # "תדליק אור חם בסלון" names a colour temperature and "תדליק אור אדום"
-        # names a colour, and both belong to `light_turn_on`.
-        for slot in SETTING_SLOT.get(tool, ()):
-            if not utterance or slot not in allowed:
-                continue
-            if (said := slot_match.setting_from(utterance, slot)) is not None:
-                # The tables are strings throughout; the schema is not.
-                # See `const.INTEGER_SETTING`.
-                data[slot] = int(said) if slot in INTEGER_SETTING else said
+        # The slots the sentence names outright moved to `repair.settle`,
+        # which runs them last for the same reason they ran first here:
+        # they replace the model's answer rather than translating it, and
+        # they are keyed on a behaviour the sentence is still allowed to
+        # change. What arrives here already carries them.
 
         if tool == "media_set_volume":
             # HA takes volume_level as 0..1; the model speaks in percent.
@@ -508,332 +487,20 @@ class CallExecutor:
         which is how a two-room sentence gets its two rooms in the right order.
         """
         name = call.get("name", "")
-        # A blank string is the model failing to fill a slot, not a value it
-        # chose. Gold carries none in 60k corpus calls, and the row pays twice
-        # for one: an invented argument and a lost exact match. Eight rows of
-        # the frozen benchmark, every one a `name` on a timer or a button.
-        args = {k: v for k, v in (call.get("arguments") or {}).items()
-                if not (isinstance(v, str) and not v.strip())}
-
-        # What the model emits is ``(tool, action)``; what everything below
-        # this line speaks is the **virtual id** - the per-service name the
-        # catalogue used before v11. Decoding here rather than threading the
-        # pair through is what let the catalogue collapse from 42 tools to 20
-        # without touching the direction guard, the service map, the routine
-        # sibling rule, the timer correction or any of their measurements.
-        #
-        # A name that is already a virtual id passes through unchanged, so a
-        # household still running v10 weights against this component keeps
-        # working - and so does every test written before the rewrite.
-        action = args.pop(ACTION_ARG, None)
-        tool = VIRTUAL_OF.get(
-            (name, action if isinstance(action, str) else None))
-        if tool is None:
-            tool = name if name in CALL_OF else ""
+        # Everything between the model's answer and a service call - the
+        # virtual-id decode, the direction guard, the slot fills, the
+        # invented-argument strip - is :mod:`repair`, which the evaluation
+        # harness runs too. It used to be written out here and transcribed
+        # there, and the transcription drifted three times in one session.
+        tool, args = repair.settle(name, call.get("arguments"), utterance)
         if not tool:
-            # Almost always one thing: weights trained against a different
-            # catalogue. v11 replaced 42 per-service tools with 20 per-domain
-            # ones, so a household running their own v10 fine-tune emits
-            # `light_turn_off` where this expects `light_control{shut}` - and
-            # `light_turn_off` still decodes, which is why the fallback above
-            # exists. What reaches here is a name from neither catalogue.
-            _LOGGER.warning(
-                "%r is not a tool this catalogue has%s - if `weights_path` "
-                "points at a fine-tune of your own, it was trained against a "
-                "different tool set", name,
-                f" (action {action!r})" if action else "")
+            action = (call.get("arguments") or {}).get(ACTION_ARG)
             return CallOutcome(name, False, f"unknown tool {name}"
                                + (f" action {action!r}" if action else ""))
-
-        # A helper toggle asked about a countdown is a timer command. Done
-        # before the direction guard rather than after, so the guard settles
-        # start against cancel on the tool this leaves behind: the toggle only
-        # carries on or off, and "עצור את הטיימר" arrives as *turn_on*.
-        # See const.HELPER_IS_A_TIMER for the corpus measurement.
-        if (utterance and tool in HELPER_IS_A_TIMER
-                and tool_router.names_a_timer(utterance)):
-            _LOGGER.debug("%r is about a timer, not a helper toggle", utterance)
-            tool = HELPER_IS_A_TIMER[tool]
-
-        # Lock or unlock, open or close, on or off. The Hebrew verb settles
-        # it and the model does not always agree with the verb - see
-        # `direction`, where the signal is measured at 1337 right and 0 wrong
-        # against gold. Corrected before anything else, because everything
-        # below reads `tool`.
-        if utterance and (settled := direction.settle(tool, utterance)) != tool:
-            _LOGGER.debug("the sentence says %s, not %s", settled, tool)
-            tool = settled
-
-        # The noun says which family. The model disagrees with it far more
-        # often than the noun is wrong: 19,410 agree and 7 disagree over the
-        # corpus, and six of the seven are a word speech noise glued to its
-        # neighbour. A starting point rather than a verdict - everything below
-        # refines it. See `direction.FAMILY_ANCHOR`.
-        if utterance:
-            settled = direction.family_named(
-                tool, tool_router.family_named(utterance))
-            if settled != tool:
-                _LOGGER.debug("%r names a %s, not a %s", utterance,
-                              direction.family_of(settled), tool)
-                tool = settled
-
-        # A toggle has no opposite, so the pair above cannot reach it - and
-        # v11 made that a live problem: all three of on, off and toggle are
-        # values of one enum now, where the router used to rank the toggle
-        # third and a tight shortlist usually cut it. 335 agree and 0 disagree
-        # on the rows whose gold really is a toggle; see `direction.TOGGLES`.
-        if utterance and (settled := direction.settle_toggle(
-                tool, utterance,
-                slot_match.level_from(utterance) is not None)) != tool:
-            _LOGGER.debug("%r says %s rather than a toggle", utterance, settled)
-            tool = settled
-
-        # A plug that is a speaker. A transport verb the model answered with a
-        # switch is a media command - the television really is a plug in most
-        # of this corpus, and a plug has no pause. `settle_media` below says
-        # which of the eight. See `direction.TRANSPORT_IS_MEDIA`.
-        if (utterance and tool in direction.TRANSPORT_IS_MEDIA
-                and tool_router.names_a_transport(utterance)):
-            _LOGGER.debug("%r is a transport verb, not a %s", utterance, tool)
-            tool = "media_pause"
-
-        # A door that is a blind. "תפתח את דלת החניה" is the garage, and דלת
-        # alone is what a lock has, so the model answers `lock_control` and a
-        # household that asked for the garage gets a bolt. All 147 corpus rows
-        # naming one of the compound cover nouns are cover rows; see
-        # `direction.NAMES_A_COVER`. After the toggle so a `switch_toggle` has
-        # already become one side of its pair, and before the rest so `settle`
-        # still says open or closed.
-        if (utterance and tool in direction.NAMES_A_COVER
-                and slot_match.names_a_compound_cover(utterance)):
-            _LOGGER.debug("%r names a cover, not a %s", utterance, tool)
-            tool = direction.NAMES_A_COVER[tool]
-            tool = direction.settle(tool, utterance)
-
-        # The number the model dropped, and the number it got wrong. "שנה את
-        # הטמפרטורה ל20 מעלות" comes back as `climate_control{off}` with no
-        # argument, and an air conditioner switches off when somebody asked
-        # for twenty degrees.
-        #
-        # This used to fire only where the model left the slot empty. It is an
-        # override now, because the sentence was measured to be right about
-        # this whenever it speaks at all - 485 agree and 2 disagree over the
-        # corpus, both of them "אשרים" - and a model that emits 23 for a
-        # sentence saying 19 is the commoner failure of the two. Same rule as
-        # the room, the floor, the name and the colour: the sentence decides.
-        # See `slot_match.temperature_from`.
-        if (utterance and tool in direction.CLIMATE_BEHAVIOURS
-                and not args.get("temperature_step")
-                and (degrees := slot_match.temperature_from(utterance))):
-            _LOGGER.debug("the sentence says %s degrees", degrees)
-            args["temperature"] = degrees
-
-        # A climate call carrying a temperature is a call to set one. Not a
-        # word in the sentence - the argument the model itself emitted, which
-        # only one of the five behaviours has anywhere to put. Measured on
-        # predictions rather than on gold: 160 agree, 1 disagrees. Unless the
-        # clause asked for a fan speed or an hvac mode, in which case it asked
-        # for that. See `direction.settle_climate`.
-        if tool in direction.CLIMATE_BEHAVIOURS:
-            settled = direction.settle_climate(
-                tool, args, utterance,
-                slot_match.mode_slot(utterance),
-                None if (slot_match.setting_from(utterance, "fan_mode")
-                         or slot_match.temperature_from(utterance))
-                else slot_match.hvac_target(utterance),
-                # The same test `settle_steps` gets below: no temperature said
-                # and no digit either. A `temperature` on such a clause was
-                # invented, and it must not outrank a mode that was spoken.
-                not slot_match.unsupported(utterance, "temperature"))
-            if settled != tool:
-                _LOGGER.debug("%s carries a temperature, so it is %s",
-                              tool, settled)
-                tool = settled
-
-        # And the two tools whose behaviours the sentence separates without
-        # ever being wrong. An allow-list: the general form of this rule was
-        # measured over the whole corpus at 647 disagreements and rejected.
-        # See `direction.HINT_DECIDED`.
-        if utterance and (name in direction.HINT_DECIDED
-                          or CALL_OF.get(tool, ("",))[0] in direction.HINT_DECIDED):
-            siblings = list(ACTIONS.get(CALL_OF[tool][0], {}).values())
-            if (settled := direction.settle_action(tool, siblings, utterance)) != tool:
-                _LOGGER.debug("the sentence says %s, not %s", settled, tool)
-                tool = settled
-
-        # Which of seven, for a countdown. The one tool the model does not do
-        # at all - it collapsed onto two of the seven - and the one whose
-        # behaviours the hint tables cannot separate either. 1262 agree and 6
-        # disagree; see `direction.settle_timer`. It is also where a transport
-        # verb aimed at a countdown lands back in the right family - see
-        # `direction.TRANSPORT_IS_A_TIMER`.
-        #
-        # **After the allow-list, not before it.** `settle_action` reads the
-        # router's hint lists, where עצור sits under cancel; "לעצור **רגע** את
-        # הספירה" is a pause, and only `_T_PAUSE` carries that phrase. With
-        # this block first, the allow-list then overruled it on eleven such
-        # rows. Letting the specialist speak last costs nothing anywhere else
-        # and gains 118 rows over the corpus - see `direction.HINT_DECIDED`.
-        if utterance and tool in direction.SETTLES_A_TIMER:
-            settled = direction.settle_timer(
-                tool, args, utterance,
-                tool_router.looks_like_question(utterance),
-                tool_router.names_a_timer(utterance))
-            if settled != tool:
-                _LOGGER.debug("the sentence says %s, not %s", settled, tool)
-                tool = settled
-
-        # The clause that names its own behaviour outright: a fan asked to
-        # turn, a cover asked to halt, a speaker asked to stop rather than
-        # pause, a cover asked for a percentage. Four families
-        # `settle_action`'s allow-list cannot take; see
-        # `direction.settle_named` for the evidence.
-        #
-        # Before the numbers below, because a cover promoted to a placement
-        # has to be one by the time `position` is filled in.
-        if utterance:
-            settled = direction.settle_named(
-                tool, utterance,
-                slot_match.level_from(utterance) is not None,
-                slot_match.setting_from(utterance, "color_name") is not None)
-            if settled != tool:
-                _LOGGER.debug("the clause names %s, not %s", settled, tool)
-                tool = settled
-
-        # Which of eight, for a speaker. 2020 agree, 1 disagree; see
-        # `direction.settle_media`. **Before** the slot fills below, not
-        # after: they are keyed on the behaviour, so a call promoted here to
-        # `media_mute` had already been filled as whatever it was, and
-        # `is_volume_muted` is not an argument of that. The same defect
-        # `settle_climate` had, one family over - settle the behaviour, then
-        # fill its slots. `evaluate.py` runs it in this place too.
-        if utterance and (tool in direction.MEDIA_BEHAVIOURS
-                          or tool == "music_play"):
-            settled = direction.settle_media(
-                tool, utterance, slot_match.names_a_level(utterance),
-                slot_match.a_plain_request(utterance),
-                slot_match.level_from(utterance) is not None)
-            if settled != tool:
-                _LOGGER.debug("the sentence says %s, not %s", settled, tool)
-                tool = settled
-
-        # And the other numbers Hebrew says out loud, read *after* every rule
-        # that can still change which behaviour this is - unlike the
-        # temperature above, which has to come first because
-        # `settle_climate` promotes on it.
-        #
-        # Half of every number in the corpus is a word rather than a digit -
-        # "שבעים וחמישה אחוז", "חצי", "רבע שעה" - and nothing here could read
-        # one until `hebrew_numbers`. 1,175 agree and 3 disagree on the
-        # percentage; see `const.NUMBER_SLOT`.
-        if utterance and "day_offset" in TOOL_ARGS.get(tool, frozenset()):
-            # Truthy, not `is not None`: today is spelled by saying nothing.
-            if (day := slot_match.day_offset_from(utterance)):
-                args["day_offset"] = day
-            else:
-                args.pop("day_offset", None)
-
-        if (utterance and (slot := NUMBER_SLOT.get(tool))
-                and (said := slot_match.level_from(utterance)) is not None):
-            args[slot] = said
-
-        # And the yes-or-no, read the same way and in the same place. A fan
-        # asked to turn and a speaker asked to be silenced both carry one, and
-        # the sentence always says which way; see `const.BOOLEAN_SLOT`.
-        if utterance and (slot := BOOLEAN_SLOT.get(tool)):
-            args[slot] = slot_match.switch_from(utterance, slot)
-
-        # And the countdown. 553 exactly right, 7 wrong, and silent on every
-        # timer row whose gold carries no duration - which is what keeps a
-        # pause from acquiring one. The units are replaced together rather
-        # than merged, because a model that said forty minutes for a sentence
-        # saying two hours must not leave the forty behind.
-        # See `const.DURATION_TOOLS`.
-        if (utterance and tool in DURATION_TOOLS
-                and (said_time := slot_match.duration_from(utterance))):
-            for unit in ("hours", "minutes", "seconds"):
-                args.pop(unit, None)
-            args.update(said_time)
-
-        # And the mirror of every rule above: a slot the sentence owns and
-        # does not name is a slot the model invented. 459 invented arguments
-        # in one release run; see `slot_match.SENTENCE_OWNS` for the nine
-        # slots this is measured safe on and the four it is not.
-        if utterance:
-            for slot in [k for k in args if slot_match.unsupported(utterance, k)]:
-                _LOGGER.debug("the sentence does not support %s=%r",
-                              slot, args[slot])
-                args.pop(slot, None)
-
-        # Which step slots this behaviour declares and the sentence has left
-        # room for. See `const.STEP_SOURCE`.
-        def _fillable_steps(name: str, said: str) -> tuple[str, ...]:
-            takes = TOOL_ARGS.get(name, frozenset())
-            return tuple(slot for slot, source in STEP_SOURCE.items()
-                         if slot in takes
-                         and slot_match.unsupported(said, source))
-
-        # The same verb also settles which way a relative argument points, and
-        # `_service_data` below adds those to the device's current reading - so
-        # a wrong sign moves the thermostat away from what was asked instead of
-        # towards it. 1222 right and 1 wrong; see `direction`.
-        if utterance:
-            args = direction.settle_steps(
-                args, utterance, _fillable_steps(tool, utterance))
 
         if tool in QUERY_TOOLS:
             return await self._answer_query(tool, args, device_id, utterance,
                                             index, total, conversation_id)
-
-        # "Play" and "play *this*" are one verb apart in Hebrew, and which one
-        # was meant is decided by whether a name follows - which the sentence
-        # settles and the model has to guess. So when the model reaches for
-        # some other media tool about a sentence that named something
-        # specific, the sentence wins.
-        #
-        # This is the same rule the rest of this module runs on, and it is
-        # safe here for the same reason: it never overrides which *domain* was
-        # chosen. The model has already decided the utterance is about audio -
-        # "תפעיל את השואב" gets vacuum_start and is never seen here - so all
-        # that is being corrected is which media tool inside that decision. It
-        # also makes the tool work before any model knows it exists, which is
-        # what a household running the previous weights has.
-        #
-        # Two strengths of evidence, because they carry different risks. A
-        # model that already said *play* has only the "what" left to get
-        # wrong, so any title is enough. A model that said something else -
-        # set the volume, pause - is being overruled on the verb too, so the
-        # sentence has to have named the **kind** as well ("האלבום", "פלייליסט")
-        # and no number: "שים את השיר על שישים" is a volume and says so.
-        #
-        # Measured over both splits, on the 663 media rows where the sentence
-        # names a kind and a title and no number: 661 are music_play and the
-        # two that are not are the same glued-ו artifact the narrow rule
-        # already mishandles today, so the widening breaks nothing new. On the
-        # 123 music rows of the held-out set it takes tool-set from 71.5% to
-        # **88.6%** and argument F1 from 72.9% to 89.7% - twenty-one rows,
-        # most of them "ערבב את האלבום", shuffle, answered with
-        # media_set_volume.
-        if tool in MEDIA_TOOLS and utterance:
-            request = slot_match.extract_music(utterance)
-            if request is not None and (
-                    tool == "media_play"
-                    or (request.media_type
-                        and not slot_match.names_a_level(
-                            utterance, request.media_id))):
-                _LOGGER.debug("the sentence names something to play; using "
-                              "music_play instead of %s", tool)
-                tool = "music_play"
-
-        # And the mirror of that upgrade: a `music_play` about a sentence
-        # that named nothing to play, and named one transport verb, is a
-        # transport command. 383 agree, 0 disagree; see `direction`.
-        if tool == "music_play" and utterance:
-            settled = direction.settle_transport(
-                tool, utterance, slot_match.extract_music(utterance) is not None)
-            if settled != tool:
-                _LOGGER.debug("nothing to play in %r; using %s", utterance, settled)
-                tool = settled
 
         if tool == "music_play":
             return await self._play_music(args, device_id, context, utterance,

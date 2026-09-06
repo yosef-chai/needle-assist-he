@@ -106,7 +106,7 @@ _JOINERS: Final[tuple[tuple[str, ...], ...]] = tuple(
 #: Every entry has to be a word the router really holds, or it is fiction
 #: dressed as a rule - a test asserts it.
 NOT_ORDERS: Final[frozenset[str]] = frozenset(
-    _fold(w) for w in ("חם", "קר", "חם מדי", "קר מדי")
+    _fold(w) for w in ("חם", "קר", "חם מדי", "קר מדי", "די")
 )
 
 
@@ -116,7 +116,16 @@ def _action_verbs() -> frozenset[str]:
     ``query`` is excluded on purpose: "מה" and "האם" open a question, and a
     question is answered as one unit even when it mentions two rooms. Read-only
     tools are excluded from the hints for the same reason, and :data:`NOT_ORDERS`
-    for a third: a room being hot is not an instruction to do anything.
+    for a third: a room being hot is not an instruction to do anything, and
+    `די` is an intensifier rather than an order.
+
+    `די` is the one entry there that was costing rows. It sits in the media
+    hints, so "די, תעצור בפינת אוכל" was cut in two, the first half named
+    nothing and was dropped, and the word carrying *stop rather than pause*
+    went with it - the model then saw "תעצור בפינת אוכל" and paused. Four
+    sentences of 44,043 cut differently without it, and all four are that
+    shape. On the v11 corpus, whose weights ship: 19 clauses hold both `די`
+    and a stop verb and all 19 are `media_stop`.
     """
     words: set[str] = set()
     for family, verbs in FAMILY_VERBS.items():

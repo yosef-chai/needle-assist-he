@@ -101,9 +101,17 @@ for _form in WHOLE_HOME_FORMS:
 # lost benchmark row. `executor` refuses `broadcast` outright when no message
 # can be read out of the sentence, so "תשדר ברמקולים שהאוכל מוכן" announced
 # nothing at all in a real house. 35 corpus clauses say it.
+# Every verb that introduces something to say. Both genders and both moods:
+# the plain imperative was missing and it is what half the corpus uses -
+# `הכרז שהכביסה מוכנה` extracted nothing at all, so `executor` refused the
+# announcement outright. Measured over the 458 message clauses of the
+# corpus, against the message gold itself carries: 403 right / 7 wrong /
+# 48 silent becomes **447 right / 8 wrong / 3 silent**, and every one of the
+# eight is injected speech noise inside the message ("הכב יסה מוכנה").
 _NOTIFY_TRIGGER: Final = re.compile(
-    r"(הודעה|תודיע|תודיעי|להודיע|תעדכן|תעדכני|לעדכן|תכריז|להכריז|תגיד|תגידי"
-    r"|תשדר|תשדרי|לשדר)")
+    r"(הודעה|תודיע|תודיעי|להודיע|הודע|הודיעי|תעדכן|תעדכני|לעדכן|עדכן|עדכני"
+    r"|תכריז|תכריזי|להכריז|הכרז|הכריזי|תגיד|תגידי"
+    r"|תשדר|תשדרי|לשדר|שדר|שדרי|תשלח|תשלחי|לשלוח|שלח|שלחי)")
 _NOTIFY_TAIL: Final = re.compile(r"[:\-]\s*(?P<msg>.+)$")
 
 # The closing courtesy, with every space optional. Speech-to-text splits words

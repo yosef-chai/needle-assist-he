@@ -2,20 +2,18 @@
   "config": {
     "step": {
       "user": {
-        "title": "Needle Assist (Hebrew)",
-        "description": "A fully local Hebrew voice assistant. Nothing runs in the cloud and nothing leaves the house.",
+        "description": "A Hebrew voice assistant that runs entirely on this machine. Nothing goes to the cloud and nothing leaves the house.",
         "data": {
-          "weights_path": "Path to your own .cact file (optional)"
+          "weights_path": "Path to your own .cact file"
         },
         "data_description": {
-          "weights_path": "Leave empty to use the model that came with the integration."
+          "weights_path": "Leave empty to use the model that ships with the integration. That is the one every update keeps current."
         }
       },
       "reconfigure": {
-        "title": "Needle Assist (Hebrew)",
-        "description": "Leave this empty to use the model that ships with the integration - that is the one every update keeps current. Fill it in only to run your own fine-tuned .cact file instead.",
+        "description": "Change which model the assistant loads.",
         "data": {
-          "weights_path": "Path to your own .cact file (optional)"
+          "weights_path": "Path to your own .cact file"
         },
         "data_description": {
           "weights_path": "Empty means the bundled model. A path here is never touched by an update, so an old file would keep loading forever."
@@ -23,9 +21,9 @@
       }
     },
     "error": {
-      "weights_not_found": "No file at that path. Home Assistant must be able to read it - inside a container, use a path under /config.",
-      "weights_not_cact": "Needs a .cact file produced by `needle build`, not a .pkl checkpoint.",
-      "weights_missing": "The bundled model is not present in this installation, so a path is required. Reinstall the integration, or point this at a .cact file yourself."
+      "weights_not_found": "No file at that path. Home Assistant has to be able to read it, so inside a container use a path under /config.",
+      "weights_not_cact": "That is not a .cact file. `needle build` produces one; a .pkl is the training checkpoint it is built from.",
+      "weights_missing": "The bundled model is not present in this installation, so a path is required. Reinstall the integration, or point this at a .cact file of your own."
     },
     "abort": {
       "already_configured": "Needle Assist is already set up.",
@@ -35,15 +33,16 @@
   "options": {
     "step": {
       "init": {
-        "title": "Needle Assist options",
-        "description": "Customizable parameters",
+        "description": "Two things the household knows better than a measurement does, and one that is off until you want it.",
         "data": {
-          "music_player": "Speaker for music (optional)",
-          "max_new_tokens": "Maximum tokens to generate per utterance"
+          "music_player": "Speaker for music",
+          "max_new_tokens": "Token budget per utterance",
+          "log_utterances": "Keep a log of what was said"
         },
         "data_description": {
           "music_player": "Which Music Assistant speaker plays when the request names no room. Leave empty if you have one player, or if you always say where you want the music.",
-          "max_new_tokens": "A tool call is about 25 tokens. The extra room is for multi-command sentences; raising it does not make answers better."
+          "max_new_tokens": "A tool call is about 25 tokens. Long announcements need more, because Hebrew reaches a tool argument as escape sequences.",
+          "log_utterances": "Writes every request and what it did to needle_assist/utterances.jsonl under your configuration directory. It stays on this machine, and it is what a Hebrew correction can be measured against."
         }
       }
     }
@@ -51,7 +50,16 @@
   "issues": {
     "weights_file_missing": {
       "title": "Needle Assist cannot find its model file",
-      "description": "The model file this integration was pointed at is no longer there:\n\n`{path}`\n\nUntil it is, the Hebrew assistant cannot start. Open the integration, choose **Reconfigure**, and either correct the path or clear the field to go back to the model that ships with the integration."
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "description": "The model file this integration was pointed at is no longer there:\n\n`{path}`\n\nSubmit to go back to the model that ships with the integration. To use a different file instead, close this and choose **Reconfigure** on the integration."
+          }
+        },
+        "abort": {
+          "not_configured": "Needle Assist is no longer set up, so there is nothing to repair."
+        }
+      }
     }
   }
 }
