@@ -794,7 +794,22 @@ _SPOKEN_LEVEL: Final = re.compile(
 _WHICH_ARE: Final = re.compile(
     r"\b(אילו|איזה|איזו|כמה"
     r"|מה\s+פתוח|מה\s+סגור|מה\s+דולק|מה\s+כבוי|מה\s+פועל)\b"
-    r"|\bהאם\s+כל\b")
+    r"|\bהאם\s+כל\b"
+    # And the same question words with the speech noise on them. This is the
+    # only place in the module where the noise had to be written into a
+    # pattern, and it is because of where the noise lands: the *state* word is
+    # clean in every one of these - פתוח, דולקים, מכובים - and the reading
+    # still failed, because it is gated on the interrogative and the
+    # interrogative is what got hit. Two shapes, both in the corpus:
+    # the particle glued to the article of the noun it introduces
+    # (איזההווילונות, האם כלהתריסים) and alef heard as ayin (עיזה, העם).
+    #
+    # Measured the way the docstring below measures, over the v11 corpus on
+    # every row whose gold call can carry the slot: **547 agree, 0 disagree**
+    # against the shipped 538/0. Nine rows, and not one reading changed.
+    r"|\b(?:אילו|איזה|איזו|כמה)ה[א-ת]"
+    r"|\bהאם\s+כלה[א-ת]"
+    r"|\b(?:עילו|עיזה|עיזו)(?![א-ת])")
 
 #: `האם` asks yes-or-no about one thing and asks *which* about several, and
 #: Hebrew marks the difference on the adjective rather than on the question
@@ -802,7 +817,7 @@ _WHICH_ARE: Final = re.compile(
 #: The plural is the whole signal, so the noun need not be read at all.
 #: Measured per clause over the corpus, on the clauses `_WHICH_ARE` alone
 #: leaves silent: **171 agree, 0 disagree**, every one of them `get_state`.
-_WHETHER: Final = re.compile(r"(?<![א-ת])האם(?![א-ת])")
+_WHETHER: Final = re.compile(r"(?<![א-ת])(?:האם|העם)(?![א-ת])")
 _PLURAL_STATE: Final = re.compile(
     r"(?<![א-ת])(?:כבויים|כבויות|מכובים|מכובות|דולקים|דולקות"
     r"|פתוחים|פתוחות|סגורים|סגורות|פועלים|פועלות"

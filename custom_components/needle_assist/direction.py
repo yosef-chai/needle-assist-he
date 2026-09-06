@@ -1234,7 +1234,22 @@ def settle_climate(tool: str, arguments: dict[str, Any], text: str,
                 else "climate_set_hvac_mode")
     if tool == "climate_set_temperature":
         return tool
-    if named_mode:
+    # A mode word holds the tool still - except where the clause has *sized a
+    # step*, which no mode call can hold: neither `climate_set_hvac_mode` nor
+    # `climate_set_fan_mode` has a `temperature_step` to put it in. "במסדרון
+    # קר מדי, תחמם קצת יותר" is the shape, and both halves matter: קר is the
+    # room being complained about rather than a mode being asked for -
+    # `hvac_target`, the strict reading, declines it - and תחמם קצת is a step
+    # said out loud. Without this the clause kept whatever the model said,
+    # which on all three benchmark rows was `off`: asked for a degree more,
+    # the house switched the heating off.
+    #
+    # The inverse of the guard three lines above, and by the same principle:
+    # there an invented temperature must not outrank a mode the speaker said,
+    # here a spoken step must not be outranked by a mode nobody asked for.
+    # Measured per clause over the v11 corpus, on every climate clause naming
+    # a mode and sizing a step: **137 agree, 0 disagree**.
+    if named_mode and not sized_step:
         return tool
     # Truthiness rather than presence, as `settle_timer` reads a duration: a
     # `temperature_step` of zero is a no-op and not evidence of anything, and
@@ -1321,6 +1336,17 @@ _NAMES_ITS_BEHAVIOUR: Final[tuple[tuple[frozenset[str], tuple[str, ...], str], .
      _STOPS, "cover_stop"),
     (frozenset(("valve_open", "valve_close", "valve_set_position")),
      _STOPS, "valve_stop"),
+    # The family the pattern had left out. A cover, a valve, a timer and a
+    # speaker all already answer "די עם את הרומבה" - enough with the robot -
+    # and a vacuum did not: it kept the model's own `clean`, so a household
+    # asking the robot to stop got it started again. There is no third
+    # behaviour to choose between here, which is why the whole stop
+    # vocabulary is safe where on a speaker only three words are: a vacuum
+    # halts one way. Measured per clause over the v11 corpus on every
+    # `vacuum_control` clause the vocabulary reaches: **95 agree, 0
+    # disagree**, and די alone accounts for 21 of them.
+    (frozenset(("vacuum_start", "vacuum_return_to_base")),
+     _STOPS, "vacuum_pause"),
     (frozenset(("fan_turn_on", "fan_turn_off", "fan_toggle")),
      _ROTATES, "fan_oscillate"),
     (frozenset(("media_pause", "media_play")),
@@ -1701,6 +1727,38 @@ MEDIA_BEHAVIOURS: Final[frozenset[str]] = frozenset((
     "media_play", "media_pause", "media_stop", "media_next_track",
     "media_previous_track", "media_mute", "media_set_volume",
     "media_select_source"))
+
+
+def names_the_volume(text: str, alone: bool) -> bool:
+    """Does the clause say *volume* outright, with nothing else to be?
+
+    :func:`settle_media` reaches ``media_set_volume`` from a bare value too,
+    because on a call the model already aimed at a speaker there is nothing
+    else a percentage could be. :func:`repair.recover` cannot lean on that: it
+    speaks where the generation derailed and there is no call to constrain it.
+    ``alone`` is the caller's answer to "does the shortlist hold nothing but
+    the speakers", passed in rather than imported, the same arrangement as
+    ``named_mode`` above.
+
+    **The noun always, the verb only when nothing else is offered**, and the
+    split is the whole rule. עוצמה and הקול are a speaker and nothing else in
+    this house; תוריד is the volume, the thermostat and the blind at once, and
+    "תוריד את המזגן למשהו כמו 27" is a temperature that says no degrees.
+
+    Measured over the v11 corpus per clause, on every clause that offers a
+    speaker and names a level. Reading a bare value: 343 agree, **3 disagree**,
+    all three speech noise on the device noun - מעוורר for the fan, הווילונוט
+    for the curtains, ורז for the tap - which the shortlist then read as a
+    speaker. Reading the verb wherever it appears: 391 agree, **7 disagree**,
+    every one of them that thermostat sentence. This split: **391 agree, 0
+    disagree**, and it speaks on none of the corpus's off-topic rows.
+    """
+    if not text:
+        return False
+    tokens = _tokens(text)
+    if _hits(list(_M_VOLUME_NOUN), tokens, text):
+        return True
+    return bool(alone and _hits(list(_M_VOLUME_VERB), tokens, text))
 
 
 def settle_media(tool: str, text: str, names_a_level: bool,

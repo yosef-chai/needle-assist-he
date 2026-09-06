@@ -440,6 +440,11 @@ def settle(name: str, arguments: dict[str, Any] | None,
 #: device on the strength of a sentence nobody finished reading.
 RECOVERABLE: Final = frozenset(("get_state", "get_weather", "get_datetime"))
 
+#: The two speaker tools. They take a volume the same way, so a shortlist
+#: holding both is two tools wide and still not a choice about *this*. See the
+#: volume branch of :func:`recover`.
+_SPEAKERS: Final = frozenset(("media_control", "music_play"))
+
 
 def recover(utterance: str) -> dict[str, Any] | None:
     r"""The call a *failed* generation should have produced, or ``None``.
@@ -473,6 +478,32 @@ def recover(utterance: str) -> dict[str, Any] | None:
 
     The arguments come from the same resolvers the executor uses, so a
     recovered call is filled exactly as a generated one would have been.
+
+    **Two widenings measured and declined**, so nobody measures them again.
+    Each would have reached one more of the ten rows a derailed generation
+    still cost on the frozen benchmark, and each fails the bar:
+
+    * *a countdown* - the shortlist is only the timer and the clause says how
+      long - **439 agree, 209 disagree**. The condition is right about the
+      tool and says nothing about the behaviour: "תוסיף עוד חמש דקות לטיימר"
+      is an `add` and "תוריד 5 דקות מהטיימר" a `less`, and both name a
+      duration. `tool_router.asks_for_a_reminder` answers a different question
+      - may this sentence reach the model - and is sound for that one.
+    * *a placement* - a cover or a valve on the shortlist and a percentage to
+      place it at - **384 agree, 2 disagree**: השסטום, a valve whose noun the
+      noise turned into a cover, and a countdown shortened by a quarter of an
+      hour, which `percent_from` reads as twenty-five per cent. Two is not
+      zero, and here it would move the wrong machine.
+
+    And a note on how those numbers are taken, because it changed one verdict.
+    The message pair's first reading said 326/20 and was measured over the
+    whole corpus: 18 of the 20 are "תשלח מייל לבוס שאני חולה", an email this
+    house has no tool for, and `looks_off_topic` refuses it before the model is
+    ever asked, so this function is never handed it. Measured where the
+    paragraph above says - on the rows the gates let through - the same
+    widening reads 325/0 and was adopted. **The scope is part of the
+    measurement**, and the two candidates declined here were re-measured inside
+    it before being declined.
     """
     names = tool_router.select_tool_names(utterance, tool_router.MAX_TOOLS)
     virtual = tool_router.select_virtual_names(utterance, 1)
@@ -484,15 +515,30 @@ def recover(utterance: str) -> dict[str, Any] | None:
     # either - and the verb settles which, at 330 agreements and none against.
     # Twelve of the forty-one failures are here, every one an announcement
     # whose Hebrew message is what derailed the generation in the first place.
-    if set(names) == set(direction.AUDIENCE):
-        if slot_match.extract_message(utterance) is None:
-            return None
+    # Offered *alongside* other tools too, which is the widening round seven
+    # made. "תשדר ברמקולים שיוצאים בעוד חמש דקות" shortlists both speaker
+    # tools as well, so the exact-pair test this used to be declined it and
+    # the household got nothing at all.
+    #
+    # The first reading of the widening said 326 agree / 20 disagree and was
+    # measuring rows this function never sees: 18 of the 20 are "תשלח מייל
+    # לבוס שאני חולה", an email this house has no tool for, and
+    # `looks_off_topic` refuses it before the model is ever asked. Measured
+    # where the docstring says - per clause over the v11 corpus, on the rows
+    # the pre-inference gates let through - the pair reads **325 agree, 0
+    # disagree**, and the broadcast half alone 99/0.
+    if set(direction.AUDIENCE) <= set(names):
         # The verb has to actually speak. Left to fall back on the router's
         # own ranking inside the pair it reads 39 rows wrong, all of them
         # `תשלח הודעה לכולם` - a notification *to everyone*, which is the one
         # phrasing where the audience and the verb point opposite ways.
-        settled = direction.settle_audience("", utterance, True)
-        return {"name": settled, "arguments": {}} if settled else None
+        if (slot_match.extract_message(utterance) is not None
+                and (settled := direction.settle_audience("", utterance, True))):
+            return {"name": settled, "arguments": {}}
+        if set(names) == set(direction.AUDIENCE):
+            # Nothing else was on the shortlist, so there is nothing below
+            # this worth trying. Where other tools were offered, there is.
+            return None
 
     # And the third thing the sentence names outright: a routine. The noun
     # says the family and the verb says which end of it, at 1,172 agreements
@@ -509,6 +555,25 @@ def recover(utterance: str) -> dict[str, Any] | None:
         wire, action = CALL_OF[settled]
         return {"name": wire,
                 "arguments": {ACTION_ARG: action} if action else {}}
+
+    # The fourth thing the sentence names outright, and the first that moves
+    # something. "תכוון את הקול בחדר השינה ל70 אחוז", "תנמיך עוד קצת את
+    # העוצמה בבלקון" - the escape sequences derail the generation, the
+    # household gets nothing, and the clause has said the behaviour, the
+    # device and the number. Five of the ten rows a derailed generation
+    # actually costs on the frozen benchmark are this one sentence shape.
+    #
+    # Two conditions, and they are what keep an actuation to the same standard
+    # as the read-only ones above: a speaker is on the shortlist at all, and
+    # the clause **names the volume** rather than merely carrying a number.
+    # `direction.names_the_volume` is where that is measured - 391 agree and
+    # none against, where reading the bare value disagrees three times and
+    # reading the verb everywhere disagrees seven. `repair.settle` fills the
+    # value afterwards from `NUMBER_SLOT`, exactly as for a generated call.
+    if (_SPEAKERS & set(names)) and direction.names_the_volume(
+            utterance, set(names) <= _SPEAKERS):
+        wire, action = CALL_OF["media_set_volume"]
+        return {"name": wire, "arguments": {ACTION_ARG: action}}
 
     if len(names) != 1 or tool not in RECOVERABLE:
         return None

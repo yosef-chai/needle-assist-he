@@ -3683,3 +3683,139 @@ def test_a_countdown_is_an_order_that_names_no_device():
     for query in ("מי ניצח במשחק אתמול", "כמה עולה לשכור חניה בתל אביב"):
         assert not ROUTER.asks_for_a_reminder(query), query
         assert ROUTER.looks_off_topic(query), query
+
+
+def test_a_derailed_generation_can_still_be_told_the_volume():
+    """The escape sequences derail the decoder and the sentence still said it.
+
+    `repair.recover` answers a *failed* generation, never a refusal, and until
+    round seven every branch of it was read-only on purpose. This is the first
+    that moves something, and it is held to the same standard: the shortlist
+    offers a speaker, and the clause **names the volume** rather than merely
+    carrying a number.
+
+    The split inside `direction.names_the_volume` is the whole rule. עוצמה and
+    הקול are a speaker and nothing else in this house, so the noun counts
+    wherever it appears; תוריד is the volume, the thermostat and the blind at
+    once, so the verb counts only where nothing else is offered. Measured per
+    clause over the v11 corpus: the bare value reads 343/3 - all three speech
+    noise on a device noun - the verb read everywhere reads 391/7, all seven
+    "תוריד את המזגן למשהו כמו 27", and this split reads **391/0**.
+    """
+    for query in ("אממ, אתה יכול לכוון את הקול בחדר השינה ל70 אחוז",
+                  "רגע, תקשיב, יאללה תכוון את הקול באמבטיה ל40 אחוז אם אפשר",
+                  "רגע, בבקשה בא לי שתנמיך עוד קצת את העוצמה בבלקון"):
+        assert REPAIR.recover(query) == {
+            "name": "media_control", "arguments": {"action": "volume"}}, query
+
+    # A thermostat lowered to a number that names no degrees, and a fan whose
+    # noun the noise destroyed. Both name a level and neither names a volume.
+    for query in ("נו תשמעי, אני צריך שתוריד את המיזוג בסלון הגדול למשהו כמו 27",
+                  "תקשיב, תוריד את המזגן בחניון למשהו כמו 28 מעלות",
+                  'נו בבקשה שים את מעוורר בממ"ד על 70 אחוז'):
+        assert REPAIR.recover(query) is None, query
+
+
+def test_the_question_survives_the_noise_on_its_question_word():
+    """The state word was clean every time; the interrogative was not.
+
+    `slot_match.state_filter` is gated on the interrogative because reading the
+    state word without it turns 127 yes-or-no questions into lists. That gate
+    is right and it was being hit by the speech noise instead of the state:
+    "איזההווילונות פתוח" says פתוח perfectly and read as nothing at all.
+
+    Two shapes, both in the corpus: the question word glued to the article of
+    the noun it introduces, and alef heard as ayin. **547 agree, 0 disagree**
+    against the shipped 538/0.
+    """
+    for query, wanted in (("רגע, איזההווילונות פתוח", "open"),
+                          ("אוקיי, עיזה הרמקולים דולקים", "on"),
+                          ("האם כלהתריסים סגור במשרד", "closed"),
+                          ("נו העם האורות מכובים", "off")):
+        assert SLOT.state_filter(query) == wanted, query
+
+    # And the gate still holds: one thing asked about wants yes or no.
+    for query in ("תבדוק אם האור בגן דולק", "האם האור דולק"):
+        assert SLOT.state_filter(query) is None, query
+
+
+def test_a_step_said_out_loud_outranks_a_mode_word_nobody_asked_for():
+    """"במסדרון קר מדי, תחמם קצת יותר" was switching the heating off.
+
+    `settle_climate` returns the tool unchanged as soon as the clause names a
+    mode, and that return sat above the step promotion - so קר, which is the
+    room being complained about rather than a mode being requested, held the
+    model's own `off` in place. No mode call can carry a `temperature_step`
+    anyway: neither `climate_set_hvac_mode` nor `climate_set_fan_mode` has one.
+
+    The inverse of the guard just above it, by the same principle. Measured per
+    clause over the v11 corpus on every climate clause naming a mode and
+    sizing a step: **137 agree, 0 disagree**.
+    """
+    for query in ("תשמע, ליד הכיריים קר מדי, תעלה טיפה",
+                  "במסדרון קר מדי, תחמם קצת יותר",
+                  "קדימה בחצר קר מדי, תחמם תודה"):
+        assert DIRECTION.settle_climate(
+            "climate_turn_off", {}, query,
+            SLOT.mode_slot(query)) == "climate_set_temperature", query
+
+    # A mode asked for as a target still settles a mode, and a fan speed a fan.
+    assert DIRECTION.settle_climate(
+        "climate_set_temperature", {}, "תעביר את המזגן לאוורור", "hvac_mode",
+        hvac_target="fan_only") == "climate_set_hvac_mode"
+    assert DIRECTION.settle_climate(
+        "climate_turn_on", {}, "שים את הפן של המזגן על חזק",
+        "fan_mode") == "climate_set_fan_mode"
+
+
+def test_a_vacuum_told_to_stop_stops_like_every_other_family():
+    """"די עם את הרומבה" started the robot instead of pausing it.
+
+    A cover, a valve, a timer and a speaker all already answer די; a vacuum was
+    the one family left out of `_NAMES_ITS_BEHAVIOUR`, so it kept whatever the
+    model said - `clean` on every benchmark row of the shape.
+
+    The whole stop vocabulary is safe here where on a speaker only three words
+    are, and the reason is that a vacuum halts one way: there is no pause
+    against stop to separate. Measured per clause over the v11 corpus on every
+    `vacuum_control` clause the vocabulary reaches: **95 agree, 0 disagree**,
+    of which די alone is 21.
+    """
+    for query in ("נו די עם את השואב", "נו די עם עת הרומבה",
+                  "תקשיב, אני צריכה שתעצור את הרומבה"):
+        assert DIRECTION.settle_named("vacuum_start", query) == "vacuum_pause", query
+
+    # And it reaches no sibling it was not measured against: a suction setting
+    # is a level, and the level rule below it is what owns that clause.
+    assert DIRECTION.settle_named(
+        "vacuum_set_fan_speed", "תוכלי לשים את הרובוט על בינוני",
+        at_a_position=True) == "vacuum_set_fan_speed"
+    assert DIRECTION.settle_named(
+        "vacuum_start", "תפעיל את השואב בסלון") == "vacuum_start"
+
+
+def test_an_announcement_is_recovered_where_other_tools_are_offered_too():
+    """"תשדר ברמקולים שיוצאים בעוד חמש דקות" was getting nothing at all.
+
+    The message pair is a shortlist two tools wide that is still not a choice
+    - both take the same single argument and the verb settles which - and
+    `recover` used to require it to be the *whole* shortlist. A sentence that
+    also mentions the speakers shortlists them too, so the test declined and a
+    derailed generation went unanswered.
+
+    Measured on the rows the pre-inference gates let through, which is the
+    scope this function runs in: **325 agree, 0 disagree**. Taken over the
+    whole corpus instead it reads 326/20, and 18 of those 20 are "תשלח מייל
+    לבוס שאני חולה" - an email this house has no tool for, refused by
+    `looks_off_topic` long before `recover` is reached. The scope is part of
+    the measurement.
+    """
+    for query in ("תשדר ברמקולים שיוצאים בעוד חמש דקות בבקשה תודה",
+                  "כאילו תכריז בכל הבית שיוצאים בעוד חמש דקות"):
+        assert REPAIR.recover(query) == {
+            "name": "broadcast", "arguments": {}}, query
+
+    # The verb still settles which half, and it still has to speak at all.
+    assert REPAIR.recover("תקשיבי, קדימה תשלח הודעה לכולם שתרדו למטה תודה") == {
+        "name": "notify_send", "arguments": {}}
+    assert REPAIR.recover("תשמע, אפשר שתכבי את הדוד בחדר ילדים אם אפשר") is None
