@@ -294,6 +294,36 @@ _MUSIC_VERB: Final = re.compile(
     r"האזין|האזן|האזני|תאזין|תאזיני|ערבב|ערבבי|תערבב|תערבבי)"
     r"(?:\s+ל(?:י|נו))?\s+")
 
+#: A letter that only ends a word, and the letter it is when it does not.
+#: Speech-to-text and fast typing both get these wrong in both directions -
+#: `data/hebrew_speech._FINALS` is the generator writing exactly that - and the
+#: verbs above are spelled once each, so "האזנ לנו את הלהקה מטאליקה"
+#: names the kind and the name perfectly and typed as nothing.
+#:
+#: One character for one, which is the whole reason this can be done here: the
+#: fold cannot move a match, so :func:`extract_music` goes on indexing the text
+#: the speaker actually said. Only the finals - the homophone swaps were
+#: measured with them and added not one clause, and every letter left out is a
+#: letter that cannot open a false reading.
+#:
+#: Measured over the v11 corpus per clause on what the *repair chain* does with
+#: the answer rather than on the parse alone, because the parse feeds two
+#: decisions that pull opposite ways - a request with a kind upgrades a
+#: transport call to `music_play`, and a request of any shape stops
+#: `settle_transport` downgrading one. **4 agree, 0 disagree**, and the
+#: downgrade never changes its answer.
+_FINAL_FOLD: Final = str.maketrans("םןךףץ",
+                                   "מנכפצ")
+
+_MUSIC_VERB_NOISY: Final = re.compile(_MUSIC_VERB.pattern.translate(_FINAL_FOLD))
+
+#: :func:`extract_music` reads the verb the match reports, and that verb comes
+#: back folded now - so the one set it is tested against is folded with it.
+#: Without this the ל of "להאזין **ל**פינק פלויד" stays on the name and
+#: Music Assistant is asked for a band nobody is called.
+_LISTEN_VERBS_FOLDED: Final = frozenset(
+    verb.translate(_FINAL_FOLD) for verb in _LISTEN_VERBS)
+
 # A word that says which *kind* of thing to play, and what it maps to in
 # ``music_assistant.play_media``. Order matters only in that each pattern is
 # anchored, so the first one that matches consumes its own word.
@@ -1170,6 +1200,38 @@ def percent_from(utterance: str) -> int | None:
 #: glues the second one onto the number.
 _VALUE_LEAD: Final = "על"
 
+#: The particles Hebrew glues to the front of a word, as
+#: `hebrew_text._PREFIX_LETTERS` spells them.
+_PARTICLE_LETTERS: Final = frozenset("ובהלכמש")
+
+#: And how a hedge introduces one. Nobody asks a thermostat for a number the
+#: way a form asks for it: "תכוון את המזגן למשהו **כמו** עשרים ואחת" and "תוריד
+#: את המזגן **לבסביבות** תשע עשרה" both name one, and both typed as none - so
+#: the model's own guess of 23 stood over a sentence that said 19.
+#:
+#: The four the generator writes, which are the four an Israeli says; see
+#: `data/lexicon.APPROX`. Measured per clause over the v11 corpus on every
+#: clause whose gold call carries `temperature`, `brightness_pct`,
+#: `volume_pct`, `position` or `percentage`: **168 agree, 0 disagree**, and on
+#: every clause whose gold carries none of them it stays silent on all.
+_VALUE_HEDGE: Final = tuple(normalise(w) for w in
+                            ("כמו", "בערך", "בסביבות", "נגיד"))
+
+
+def _leads_a_value(word: str) -> bool:
+    """Does this word introduce a bare number - the preposition or a hedge?
+
+    The particles come off first. Hebrew glues them onto the hedge as readily
+    as onto anything else, and the corpus carries "לבסביבות", "בנגיד" and
+    "בבערך" - two particles deep in the first case.
+    """
+    if word == _VALUE_LEAD:
+        return True
+    return any(word == hedge
+               or (word.endswith(hedge)
+                   and set(word[:-len(hedge)]) <= _PARTICLE_LETTERS)
+               for hedge in _VALUE_HEDGE)
+
 
 def _value_after_lead(utterance: str, low: int, high: int) -> int | None:
     """The one number in range that a destination preposition introduces.
@@ -1178,6 +1240,10 @@ def _value_after_lead(utterance: str, low: int, high: int) -> int | None:
     The range is the caller's, because it is one of the two things standing
     between this and reading a house number: a level is 0-100 and a thermostat
     is 5-35, and outside those a bare number after על is not the slot.
+
+    The preposition is not the only thing that introduces one: a hedge does it
+    too, and the corpus and the household both use them. See
+    :func:`_leads_a_value`.
 
     The other is this: **a number that names its own unit is not a unitless
     one.** This is the last reading tried and it has to yield to every reading
@@ -1197,7 +1263,7 @@ def _value_after_lead(utterance: str, low: int, high: int) -> int | None:
         # The conjunction counts as the preposition: "על 20 ועל 24" names two
         # temperatures and has to settle nothing, and without the ו stripped
         # only the first one is seen and the clause reads as a single value.
-        if start > 0 and words[start - 1].lstrip("ו") == _VALUE_LEAD:
+        if start > 0 and _leads_a_value(words[start - 1].lstrip("ו")):
             found.add(value)
         elif (lead := words[start].lstrip("ו")).startswith("ל") and len(lead) > 1:
             # Longer than the preposition, and that is the whole guard. It read
@@ -1318,11 +1384,11 @@ def extract_music(utterance: str) -> MusicRequest | None:
     text = " ".join(utterance.split())
     # The last verb, not the first: "תוכל לשים לי" has the frame's verb in
     # front of the real one, and what follows the real one is the title.
-    openers = list(_MUSIC_VERB.finditer(text))
+    openers = list(_MUSIC_VERB_NOISY.finditer(text.translate(_FINAL_FOLD)))
     if not openers:
         return None
     rest = _POLITE_TAIL.sub("", text[openers[-1].end():]).strip()
-    if openers[-1].group("verb") in _LISTEN_VERBS and rest.startswith("ל"):
+    if openers[-1].group("verb") in _LISTEN_VERBS_FOLDED and rest.startswith("ל"):
         rest = rest[1:]
 
     media_type: str | None = None

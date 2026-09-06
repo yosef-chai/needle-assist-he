@@ -813,20 +813,30 @@ def _noun_index(family: str) -> PhraseIndex:
     return index
 
 
-def _hits(keywords: list[str], toks: set[str], query: str) -> int:
-    """Count matching keywords. Multi-word keys fall back to substring."""
+def _matched(keywords: list[str], toks: set[str], query: str) -> list[str]:
+    """The keywords this sentence carries, folded, in the order they are listed.
+
+    Multi-word keys fall back to substring. Returned rather than counted
+    because :func:`family_named` has to compare the keys against each other,
+    and a second copy of this loop would be a second thing to keep in step.
+    """
     folded = _fold(query)
-    n = 0
+    found = []
     for key in keywords:
         if " " in key:
             if _fold(key) in folded:
-                n += 1
+                found.append(_fold(key))
         # Keys are stripped the same way query tokens are, or a keyword that
         # carries punctuation can never match: "בלוטות'" and "תסוויץ'" are
         # written with a geresh, which _variants removes from the token.
-        elif _fold(key).strip(_PUNCT) in toks:
-            n += 1
-    return n
+        elif (stripped := _fold(key).strip(_PUNCT)) in toks:
+            found.append(stripped)
+    return found
+
+
+def _hits(keywords: list[str], toks: set[str], query: str) -> int:
+    """Count matching keywords. Multi-word keys fall back to substring."""
+    return len(_matched(keywords, toks, query))
 
 
 # ק and כ are one sound in Israeli Hebrew and speech-to-text swaps them freely:
@@ -1048,12 +1058,35 @@ def family_named(query: str) -> str | None:
     noun too few costs the whole sentence. This vote is the opposite trade -
     it overrules a model that has already answered - and it is the one that was
     measured.
+
+    And two families are not two readings when one of the two nouns is a word
+    *inside* the other. "תכבה מצב שקט" names the helper through "מצב שקט"
+    and the media family through "שקט", which is the second half of it; the
+    vote tied, the reader went quiet, and the house's quiet mode was answered
+    with a pause and with the lights switched off. The same for the sentence
+    the paragraph above cites: "האוטומציה תריסים בבוקר" contains תריסים
+    and is not a blind, and it is settled here now rather than left to the
+    model to get right.
+
+    A family drops out when *every* key it matched is contained in some other
+    family's key, which is the strict statement of "it named nothing the more
+    specific reading did not name already". Measured per clause over the v11
+    corpus against the family of gold's own call: **364 rescued, 0 broken**.
     """
     query = _ROOM_HEAD.sub(" ", query)
     tokens = _tokens(query)
-    named = [family for family, nouns in FAMILY_NOUNS.items()
-             if family != "query" and _hits(list(nouns), tokens, query)]
-    return named[0] if len(named) == 1 else None
+    named = {family: keys for family, nouns in FAMILY_NOUNS.items()
+             if family != "query"
+             and (keys := _matched(list(nouns), tokens, query))}
+    if len(named) <= 1:
+        return next(iter(named), None)
+    survivors = [
+        family for family, keys in named.items()
+        if not all(any(key != other and key in other
+                       for rival, rest in named.items() if rival != family
+                       for other in rest)
+                   for key in keys)]
+    return survivors[0] if len(survivors) == 1 else None
 
 
 #: The verbs that only a speaker can answer. Pause, resume, skip, go back.
@@ -1200,9 +1233,50 @@ def names_a_clock(query: str) -> bool:
     return True
 
 
+#: How long a device noun has to be before it is allowed to be found without a
+#: word boundary on either side of it. Four characters, and three is a cliff.
+#:
+#: The corpus injects a lost space on 12% of its noised rows and a spurious one
+#: on 10% - `data/hebrew_speech.stt_noise`, the ``merge`` and ``split`` kinds -
+#: and `_hits` matches a single-word key by token equality, so both of them
+#: silence every noun in the sentence: "התריסיםבבייסמנט" and "מה הטמפרטו רה"
+#: name a device apiece and scored nothing, and the refusal gate threw the
+#: sentence away before the model ever saw it. Removing the spaces reads both,
+#: because a join is what the noise made and a join is what undoes it.
+#:
+#: This is the *router*, where a false match is expensive - it is the
+#: measurement above `_FINALS` that keeps the phonetic folding out of here -
+#: so the reading is offered nothing but the despacing: no homophones, no final
+#: forms, and a floor that was chosen on the numbers rather than on taste.
+#: Measured over the 27,210 rows of the v11 corpus, on the gate's own two
+#: columns and on the shortlist's:
+#:
+#:     floor   orders rescued   off-topic let through   ...able to actuate
+#:       3          40                  55                     31
+#:       4          28                   0                      0
+#:       5          18                   0                      0
+#:       6           9                   0                      0
+#:
+#: Three is off a cliff for the reason the whole idea is delicate: אור, גן and
+#: דלת sit inside ordinary Hebrew words, and thirty-one sentences about
+#: nothing in this house were handed a tool that can move something. At four
+#: the rescue is largest and the cost is exactly zero. On the five-name
+#: shortlist, which `score_families` also feeds and whose trade is the opposite
+#: one, gold's own tool is **gained on 24 clauses and lost on none**.
+#:
+#: A homophone fold was offered to this same reading and declined. צ/ז
+#: is the swap that breaks a device noun most visibly - "להדליק את
+#: המזלמה במרפסת" is a camera the gate throws away - and over the
+#: same 27,210 rows it changes the gate's answer on **zero** of them in
+#: either direction. A rule with no measurement behind it is not a rule
+#: this project ships, however plausible the example.
+_GLUE_FLOOR: Final = 4
+
+
 def score_families(query: str) -> list[tuple[str, int]]:
     """Families with a non-zero score, most likely first."""
     toks = _tokens(query)
+    despaced = _fold(query).replace(" ", "")
     scored = []
     for fam in FAMILY_TOOLS:
         # Nouns weigh triple: they identify the device, which is what decides
@@ -1210,6 +1284,14 @@ def score_families(query: str) -> list[tuple[str, int]]:
         nouns = _hits(FAMILY_NOUNS.get(fam, []), toks, query)
         if not nouns and _noun_index(fam).find(query, fuzzy=False):
             nouns = 1
+        if not nouns:
+            # And the same nouns again with the sentence's spaces taken out;
+            # see :data:`_GLUE_FLOOR`. Last, so a noun the strict reader can
+            # hear is never counted twice, and worth exactly one noun.
+            nouns = int(any(
+                len(key) >= _GLUE_FLOOR and " " not in key and key in despaced
+                for key in (_fold(k).strip(_PUNCT)
+                            for k in FAMILY_NOUNS.get(fam, []))))
         score = (_NOUN_WEIGHT * nouns
                  + _hits(FAMILY_VERBS.get(fam, []), toks, query)
                  + _hits(FAMILY_WEAK.get(fam, []), toks, query))

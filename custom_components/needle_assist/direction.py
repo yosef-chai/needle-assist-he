@@ -1401,6 +1401,42 @@ _PLACEABLE: Final[dict[str, str]] = {
 }
 
 
+#: The verb that only makes a thing happen. "תעשה אור בבלקון" is a light
+#: being turned on, and the model answered it with a toggle - which turns the
+#: light *off* again in a room where it was already lit.
+#:
+#: Read through a lost space, the same way the off-word below it is and for
+#: the same reason: the noise glues this verb to the next word as readily as
+#: any other, and "תוכל לעשותאת המנורה" is a lamp being asked for. The
+#: ט/ת fold is *not* offered here - it buys nothing this does not, and it is
+#: not free at a call site that actuates.
+#:
+#: לעשות names no direction of its own, which is why it needs a rule rather
+#: than a place in :data:`VOCABULARY`: it takes whatever direction the rest of
+#: the sentence gives it, and where the rest of the sentence gives none, it
+#: turns the thing on. Counted over the v11 corpus on every clause carrying
+#: one of these verbs, the sentence says which by naming a word: טוגל or
+#: תחליף for a toggle (96 clauses), אוף for an off (13), סיבוב for an
+#: oscillation (88) - and where it names none of them, **418 clauses are gold
+#: `turn_on` and none is anything else**. On predictions it moves one row
+#: of the frozen benchmark, and it is the glued one.
+_MAKES_IT: Final[tuple[str, ...]] = (
+    "תעשה", "תעשי", "תעשו", "לעשות", "עשה", "עשי",
+    "שתעשה", "שתעשי")
+
+#: The toggles that verb turns into a switch-on, and what each becomes. The
+#: three families whose toggle the model reaches for; there is no cover or
+#: media toggle to confuse with one.
+#:
+#: The guards are the tables that already exist. `TOOL_HINTS` holds the words
+#: that ask for a toggle - it is what :func:`settle_behaviour` runs this rule's
+#: mirror on, a paragraph above - and `VOCABULARY` holds the words that ask
+#: for an off. The off half is read through a lost space, because that is
+#: exactly where the noise puts one: "תעשה אוףאת הלייטס" is a light being
+#: switched off, and read strictly it would have been switched on instead.
+_MAKING_IT_IS_ON: Final[dict[str, str]] = {
+    toggle: sides[0] for toggle, sides in TOGGLES.items()}
+
 #: A light asked for a colour is a light asked to come on. The same hole as
 #: the climate promotion one function up, and it opens the same way: the model
 #: answers "אני רוצה אור אדום" with `light_toggle`, `color_name` is not one of
@@ -1522,6 +1558,13 @@ def settle_named(behaviour: str, text: str,
             return turn_on
         if off and not on:
             return turn_off
+    if behaviour in _MAKING_IT_IS_ON and _hits_noisy(list(_MAKES_IT), text):
+        # And the verb that names no direction at all, on a behaviour that
+        # is one. See :data:`_MAKES_IT`.
+        switched_off = TOGGLES[behaviour][1]
+        if not _hits(TOOL_HINTS.get(behaviour, []), tokens, text) and (
+                not _hits_noisy(list(VOCABULARY[switched_off]), text)):
+            return _MAKING_IT_IS_ON[behaviour]
     if names_a_colour and behaviour in _COLOURS_ARE_ON:
         return "light_turn_on"
     if at_a_position and behaviour in _PLACEABLE:

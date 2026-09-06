@@ -2664,8 +2664,8 @@ def test_the_noun_says_which_family():
 
     Questions are excluded, because a question names a device and asks *about*
     it - `tool_router.query_domain` owns those. A sentence naming two families
-    settles nothing, which is what keeps an automation whose *name* is about
-    blinds from becoming a cover command.
+    settles nothing - unless one of the two nouns is a word inside the other,
+    which is not two readings; see :func:`tool_router.family_named`.
     """
     assert ROUTER.family_named("כבה את המאוורר במטבח") == "fan"
     assert DIRECTION.family_named("light_turn_off", "fan") == "fan_turn_on"
@@ -2673,8 +2673,15 @@ def test_the_noun_says_which_family():
     assert DIRECTION.settle(
         DIRECTION.family_named("light_turn_off", "fan"),
         "כבה את המאוורר במטבח") == "fan_turn_off"
-    # Two families named settles nothing.
-    assert ROUTER.family_named("תדליק את האוטומציה תריסים בבוקר") is None
+    # Two families named settles nothing - "שקט" is a house mode and a suction
+    # setting, and the sentence names a vacuum, so neither noun contains the
+    # other and the model keeps its answer.
+    assert ROUTER.family_named("אמם, תשמעי, שים את הרומבה על מצב שקט תודה") is None
+    # But an automation whose *name* is about blinds is not two readings: the
+    # cover noun is a word inside the routine's own, so the longer key wins and
+    # this is settled here rather than left to the model to get right.
+    assert ROUTER.family_named(
+        "תדליק את האוטומציה תריסים בבוקר") == "routine"
     # A family the model already agreed with is left alone.
     assert DIRECTION.family_named("light_turn_off", "light") == "light_turn_off"
     # A question is not this rule's business.
@@ -3945,3 +3952,164 @@ def test_a_device_noun_inside_a_room_name_is_not_a_device():
     # noun is left alone.
     assert ROUTER.family_named("כבה את המחשב בסלון") == "switch"
     assert ROUTER.family_named("רגע, במרפסת חם מדי, תקרר משמעותית") == "climate"
+
+
+def test_a_number_a_hedge_introduces_is_still_a_number():
+    """"תכוון את המזגן למשהו כמו עשרים ואחת" was coming back as 23.
+
+    `_value_after_lead` took the number after על and the number with ל glued to
+    it and nothing else, so every sentence that hedges its number named none -
+    and the model's own guess stood over a sentence that said otherwise. Nobody
+    asks a thermostat for a number the way a form asks for it.
+
+    The four hedges are the generator's own `APPROX`, which is the four an
+    Israeli says. Measured per clause over the v11 corpus on every clause whose
+    gold call carries `temperature`, `brightness_pct`, `volume_pct`, `position`
+    or `percentage`: **168 agree, 0 disagree**, and on the clauses whose gold
+    carries none of them it stays silent on every one.
+    """
+    assert SLOT.temperature_from(
+        "אני רוצה שתכוון את המזגן במקלחת למשהו כמו עשרים ואחת") == 21
+    assert SLOT.level_from("תכוון את האורות בחדר המחשב לבסביבות 80 אחוז") == 80
+
+    # The particles come off the hedge, and the corpus glues two of them on.
+    assert SLOT.temperature_from(
+        "אפשר להוריד את המזגן במטבח לבסביבות תשע עשרה תודה") == 19
+    assert SLOT.temperature_from(
+        "כאילו תשמע, אני רוצה נגיד עשרים וחמש בסלון בבקשה") == 25
+
+    # And every guard that stood before it still stands: a step is not a
+    # target, and a number that names its own unit is not a unitless one.
+    assert SLOT.temperature_from("תוריד שתי מעלות במטבח") is None
+    assert SLOT.temperature_from("תפעיל טיימר ל5 דקות") is None
+
+
+def test_the_music_verb_survives_a_broken_final_letter():
+    """"האזנ לנו את הלהקה מטאליקה" answered with a pause.
+
+    The verbs are spelled once each, so a final letter the noise breaks - ן for
+    ן at the end of האזן - silences the whole parse, and a sentence naming the
+    kind and the name perfectly typed as nothing. The fold is one character for
+    one, which is why it can be done here: it cannot move a match, so the
+    parser goes on indexing the text the speaker actually said.
+
+    Measured over the v11 corpus per clause on what the repair chain does with
+    the answer rather than on the parse alone, because the parse feeds two
+    decisions that pull opposite ways: **4 agree, 0 disagree**, and the
+    downgrade to a transport command never changes its answer.
+    """
+    for query in ("האזנ לנו את הלהקה מטאליקה בכניסה לבית",
+                  "האזן לנו את הלהקה מטאליקה בכניסה לבית"):
+        request = SLOT.extract_music(query)
+        assert request is not None and request.media_type == "artist", query
+        assert request.media_id == "מטאליקה", query
+
+    # The verb the match reports is folded now, so the set that decides whether
+    # to take the ל off the name has to be folded with it - or Music Assistant
+    # is asked for a band nobody is called.
+    request = SLOT.extract_music("תוכל להאזין לפינק פלויד")
+    assert request is not None and request.media_id == "פינק פלויד"
+
+    # A kind with nothing after it is still a resume, folded or not.
+    assert SLOT.extract_music("רגע, תנגן את השיר במטבח") is None
+
+
+def test_a_device_noun_the_lost_space_glued_still_names_its_device():
+    """"לפתוח את התריסיםכאן" was refused before the model saw it.
+
+    The corpus injects a lost space on 12% of its noised rows and a spurious
+    one on 10% - `data/hebrew_speech.stt_noise` - and `_hits` matches a
+    single-word key by token equality, so both silence every noun in the
+    sentence and the refusal gate throws it away. Removing the spaces reads
+    both, because a join is what the noise made and a join is what undoes it.
+
+    Four characters, and three is a cliff: אור, גן and דלת sit inside ordinary
+    Hebrew words. Measured over the 27,210 rows of the v11 corpus - at three,
+    31 off-topic sentences reach a tool that can move something; at four,
+    **28 orders rescued and not one off-topic row let through**. On the
+    five-name shortlist, whose trade is the opposite one, gold's own tool is
+    **gained on 24 clauses and lost on none**.
+    """
+    for query in ("כאילו תקשיבי, את יכולה לפתוח את התריסיםכאן בבקשה",
+                  "נו תקשיבי, תוכל לכבות את המטעןבשירותים בבקשה"):
+        assert not ROUTER.looks_off_topic(query), query
+        assert ROUTER.select_tool_names(query), query
+
+    # And the spurious space, which is the same reading from the other side.
+    assert ROUTER.score_families("מה הטמפרטו רה במוסך")
+
+    # The gate is still a gate. None of these names anything this house has,
+    # and a three-letter floor would have carried the last two over it.
+    for query in ("כמה עולה לשכור חניה בתל אביב",
+                  "מי היה ראש הממשלה הראשון של ישראל",
+                  "תספר לי בדיחה על אורחים"):
+        assert ROUTER.looks_off_topic(query), query
+
+
+def test_a_noun_inside_another_noun_is_not_a_second_reading():
+    """The house's quiet mode was answered with a pause, and with the lights off.
+
+    "תכבה מצב שקט" names the helper family through "מצב שקט" and the media
+    family through "שקט", which is the second half of it. Two families settle
+    nothing, so `family_named` went quiet and whatever the model answered
+    stood - `media_control{pause}` on one row and `light_control{shut}` on two
+    more.
+
+    A family drops out when *every* key it matched is contained in some other
+    family's key, which is the strict statement of "it named nothing the more
+    specific reading did not name already". Measured per clause over the v11
+    corpus against the family of gold's own call: **364 rescued, 0 broken**.
+    """
+    for query in ("תשמעי, תכבה מצב שקט",
+                  "רגע, אני צריך שתכבי מצב שקט אם אפשר"):
+        assert ROUTER.family_named(query) == "helper", query
+        assert REPAIR.settle("light_control", {"action": "shut"}, query)[0] \
+            == "input_boolean_turn_off", query
+
+    # A real tie is still a tie. שקט is the house mode *and* the vacuum's
+    # suction setting, and where the sentence names the vacuum neither noun is
+    # inside the other - 45 clauses say the mode and 19 say the suction, and
+    # the corpus never crosses them.
+    assert ROUTER.family_named(
+        "אמם, תשמעי, שים את הרומבה על מצב שקט תודה") is None
+
+    # And a sentence naming one family is untouched by any of it.
+    assert ROUTER.family_named("כבה את המאוורר במטבח") == "fan"
+
+
+def test_making_light_is_turning_it_on_not_toggling_it():
+    """"תעשה אור בבלקון" came back as a toggle, which is the light going off.
+
+    לעשות names no direction of its own - it takes whichever one the rest of
+    the sentence gives it - so it has a rule rather than a place in
+    `VOCABULARY`. Where the sentence gives none, it turns the thing on: over
+    the v11 corpus, on every clause carrying the verb and naming no toggle
+    word, no off word and no oscillation, **417 clauses are gold `turn_on` and
+    none is anything else**.
+
+    The guards are the tables that already exist, and the off half is read
+    through a lost space because that is exactly where the noise puts one.
+    """
+    for tool, query in (("light_control", "תעשה אור בבלקון"),
+                        ("light_control", "תעשי את התאורה בלובי"),
+                        # The verb with the next word glued to it, which is
+                        # where the noise puts the seam and what took this
+                        # from 417 clauses to 418.
+                        ("light_control", "תקשיבי, תוכל לעשותאת המנורה בבקשה תודה"),
+                        ("fan_control", "נו את יכולה לעשות את הוונטה בגן תודה")):
+        settled = REPAIR.settle(tool, {"action": "flip"}, query)[0]
+        assert settled.endswith("_turn_on"), (query, settled)
+
+    # A sentence that says which way is left alone, in all three directions.
+    assert REPAIR.settle("light_control", {"action": "flip"},
+                         "תקשיבי, אפשר שתעשה טוגל לתאורה בסלון")[0] \
+        == "light_toggle"
+    assert REPAIR.settle("fan_control", {"action": "flip"},
+                         "תעשה שמאוורר בלובי תפעיל סיבוב")[0] \
+        == "fan_oscillate"
+
+    # And the off word with the next word glued to it is still an off word:
+    # read strictly, this sentence would have switched the lights *on*.
+    assert REPAIR.settle("light_control", {"action": "flip"},
+                         "תשמעי, אפשר שתעשה אוףאת הלייטס בסלון הגדול")[0] \
+        == "light_turn_off"
