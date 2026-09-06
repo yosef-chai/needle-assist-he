@@ -452,3 +452,60 @@ async def test_a_device_inside_a_room_name_is_the_room(
                           "תכבה את המחשב בסלון")
     assert outcome.ok, outcome.detail
     assert calls[0].data["entity_id"] == [made["desk_computer"]]
+
+
+# -- the same thing, kept in another domain -----------------------------------
+
+
+async def test_a_television_in_the_other_domain_is_refused_not_guessed(
+    hass: HomeAssistant, house: dict[str, str], executor: CallExecutor
+) -> None:
+    """The one ambiguity the registry cannot settle, kept as a refusal.
+
+    A television is a `switch` in 43 of this corpus's 59 television rows and a
+    `media_player` in the rest, so eighteen benchmark rows are the model
+    answering `media_control` where gold says `switch_control`. A fallback was
+    written for it and taken back out: the sentence names no room, so widening
+    from `switch` to `media_player` reaches *every* speaker in the house and
+    silences the kitchen with it. See `const.ROUTINE_SIBLING`'s comment for the
+    two other routes and why they fail too.
+    """
+    entities = er.async_get(hass)
+    living = ar.async_get(hass).async_get_area_by_name("סלון")
+    entry = entities.async_get_or_create("media_player", "needle_test", "tv",
+                                         suggested_object_id="tv")
+    entities.async_update_entity(entry.entity_id, area_id=living.id)
+    hass.states.async_set(entry.entity_id, "on", {"friendly_name": "טלוויזיה"})
+
+    off = async_mock_service(hass, "media_player", "turn_off")
+    outcome = await _wire(executor, "switch_control", "shut", {},
+                          "תכבה את הטלוויזיה")
+    assert not outcome.ok, "a guess here silences the speaker too"
+    assert not off
+
+
+async def test_the_registry_says_whether_a_mode_is_a_helper_or_a_scene(
+    hass: HomeAssistant, house: dict[str, str], executor: CallExecutor
+) -> None:
+    """"מצב חופשה" was `routine_run` in one corpus recipe and `helper_toggle`
+    in another. `data/repair_v11.py` settled the corpus on the helper; which
+    one it is in *this* house is a question for the registry, and that is what
+    `ROUTINE_SIBLING` has always been for.
+    """
+    entities = er.async_get(hass)
+    entry = entities.async_get_or_create("scene", "needle_test", "vacation",
+                                         suggested_object_id="vacation_mode")
+    hass.states.async_set(entry.entity_id, "scening",
+                          {"friendly_name": "מצב חופשה"})
+
+    scene = async_mock_service(hass, "scene", "turn_on")
+    outcome = await _wire(executor, "helper_toggle", "on",
+                          {"name": "vacation_mode"}, "תפעיל את מצב חופשה")
+    assert outcome.ok, outcome.detail
+    assert scene[0].data["entity_id"] == [entry.entity_id]
+
+    # There is nothing to turn off. A scene cannot be un-activated, so the
+    # refusal is the right answer and not a gap.
+    outcome = await _wire(executor, "helper_toggle", "shut",
+                          {"name": "vacation_mode"}, "תכבה את מצב חופשה")
+    assert not outcome.ok

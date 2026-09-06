@@ -518,9 +518,11 @@ class CallExecutor:
             named_domain = NAME_ADDRESSED[tool]
             entity_ids = self._match_named(named_domain, utterance,
                                            args.get("name"))
-            if not entity_ids and (sibling := ROUTINE_SIBLING.get(tool)):
+            for sibling in (ROUTINE_SIBLING.get(tool, ()) if not entity_ids
+                            else ()):
                 # See ROUTINE_SIBLING: the registry knows whether this
-                # household's "אווירת ערב" is a scene or a script.
+                # household's "אווירת ערב" is a scene or a script, and whether
+                # its "מצב חופשה" is a helper or one of those two.
                 entity_ids = self._match_named(
                     NAME_ADDRESSED[sibling], utterance, args.get("name"))
                 if entity_ids:
@@ -528,6 +530,7 @@ class CallExecutor:
                                   NAME_ADDRESSED[sibling], named_domain)
                     tool = sibling
                     domain, service = SERVICE_MAP[tool]
+                    break
             if (not entity_ids and not args.get("name")
                     and tool in ALL_WHEN_UNNAMED):
                 # "cancel the timer" with nothing to disambiguate: all of them.

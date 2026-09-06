@@ -605,10 +605,38 @@ NAME_ADDRESSED: Final = {
 # *enables* an automation rather than running it, which is not the same act
 # as activating a scene, and guessing wrong there would leave a household
 # with an automation quietly switched on.
-ROUTINE_SIBLING: Final = {
-    "scene_activate": "script_run",
-    "script_run": "scene_activate",
+ROUTINE_SIBLING: Final[dict[str, tuple[str, ...]]] = {
+    "scene_activate": ("script_run", "input_boolean_turn_on"),
+    "script_run": ("scene_activate", "input_boolean_turn_on"),
+    # "מצב אורחים", "מצב חופשה", "מצב לילה". The corpus said `routine_run` in
+    # one recipe and `helper_toggle` in another; `data/repair_v11.py` settled
+    # the corpus on the helper, and which one it is in *this* house is a
+    # question for the registry rather than for the corpus. Tried in order,
+    # and only when no helper by that name exists.
+    "input_boolean_turn_on": ("scene_activate", "script_run"),
+    # No entry for the off direction, on purpose: a scene cannot be
+    # un-activated and a script cannot be un-run, so a house whose "מצב חופשה"
+    # is a scene has nothing to turn off and refusing is the right answer.
 }
+
+# A television is the one device this cannot do, and the reason is worth
+# writing down where somebody will look for it. It is a `switch` in 43 of this
+# corpus's 59 television rows and a `media_player` in the rest, so eighteen
+# rows of the frozen benchmark are the model answering `media_control` where
+# gold says `switch_control` - and none of them is a model error.
+#
+# Three ways out were tried and all three are worse than refusing:
+#
+# * by name - `slot_match._blocked_forms` drops "טלוויזיה" on purpose, because
+#   a family noun used as an entity name would swallow every family command;
+# * by area - the sentence names no room, so "תכבה את הטלוויזיה" reaches every
+#   `media_player` in the house and silences the kitchen speaker with it;
+# * by device class - `media_player` has `tv`, and households do not set it.
+#
+# So the household answers the domain the model named, and a television in the
+# other domain is a refusal. See `tool_router._TRANSPORT_VERBS`, which draws
+# the same line for the same reason: the transport verbs are unambiguous and
+# the on/off verbs are not.
 
 #: Which numeric slot a behaviour's percentage lands in.
 #:
