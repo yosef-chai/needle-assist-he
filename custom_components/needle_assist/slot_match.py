@@ -57,7 +57,7 @@ from .area_map import (
     slug_for_name,
 )
 from .hebrew_text import PhraseIndex, normalise
-from .tool_router import FAMILY_NOUNS, _fold, _hits, _tokens, _variants
+from .tool_router import _GLUE_FLOOR, FAMILY_NOUNS, _fold, _hits, _tokens, _variants
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -720,7 +720,37 @@ def setting_from(utterance: str, slot: str) -> str | None:
                     and folded in ("", normalise("ה"))):
                 break
             found.add(value)
-    return found.pop() if len(found) == 1 else None
+    if found:
+        return found.pop() if len(found) == 1 else None
+    # And the same table again with the sentence's spaces taken out, which is
+    # the reading round nine gave the refusal gate: "למהירות נמוךאם
+    # אפשר" names a fan speed and typed as none, because נמוך arrived with
+    # the next word stuck to it.
+    #
+    # Only where the strict reader found *nothing* - two readings settle
+    # nothing here as everywhere else - and only for keys of four characters
+    # and up, the floor `tool_router._GLUE_FLOOR` was measured to.
+    #
+    # Measured per clause over the v11 corpus **inside this function's own
+    # scope**: asked only for slots the gold behaviour can actually hold. That
+    # qualifier is the whole measurement - asked outside it, קירור is an hvac
+    # mode on every clause that switches the machine off, 947 of them, which
+    # says nothing about the rule. In scope: **55 agree, 1 disagrees**, and
+    # the one is "את הקירור על הבלקון ייווש" - ייבוש with the noise on
+    # it, so the value word is illegible and the device noun wins.
+    if slot == "device_class":
+        # Every slot but this one. `device_class` is the slot the benchmark's
+        # gold systematically omits - 262 of the 415 remaining failures are
+        # exactly that, and `gold_gap.py` exists to report it - so a reading
+        # that fills it *more* often is measurably worse and behaviourally
+        # neither: the executor resolves the entity from the noun either way.
+        # Offered here it cost two floor rows that had been exact, which is
+        # the README's own warning read from the other side.
+        return None
+    flat = normalise(utterance).replace(" ", "")
+    glued = {value for key, value in table.items()
+             if " " not in key and len(key) >= _GLUE_FLOOR and key in flat}
+    return glued.pop() if len(glued) == 1 else None
 
 
 #: The words that turn a two-state slot *off*, per slot. Read only once the

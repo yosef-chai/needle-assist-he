@@ -394,6 +394,19 @@ def settle(name: str, arguments: dict[str, Any] | None,
     # Announce it to the house, or send it to a phone. The two take the same
     # single argument and the model confuses them in both directions; the verb
     # never does. 330 agree, 0 disagree; see `direction.settle_audience`.
+    #
+    # And the case where it confused them with something else entirely: the
+    # speakers were heard and the message was not, so an announcement came
+    # back as a transport command and, once, as every lock in the house. Asked
+    # only where the model answered outside the pair, so the rule above keeps
+    # the cases it was measured on. 248 agree, 0 disagree; see
+    # `direction.announces`.
+    if utterance and tool not in direction.AUDIENCE and (
+            announced := direction.announces(
+                utterance, slot_match.extract_message(utterance) is not None)):
+        _LOGGER.debug("%r announces something; using %s instead of %s",
+                      utterance, announced, tool)
+        tool = announced
     if utterance and tool in direction.AUDIENCE:
         settled = direction.settle_audience(
             tool, utterance, slot_match.extract_message(utterance) is not None)

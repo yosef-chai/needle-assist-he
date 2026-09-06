@@ -1663,6 +1663,43 @@ def settle_audience(tool: str, text: str, has_message: bool) -> str:
     return tool
 
 
+#: The verbs that announce something, pooled from the two halves - which half
+#: it is stays :func:`settle_audience`'s business - minus שלח and its forms.
+#: That verb sends a message and it also sends the robot to its dock and the
+#: sound to the terrace; `tool_router._AMBIGUOUS` lists it for exactly that
+#: reason. Dropping it costs nothing, because every clause it reached here also
+#: says הודעה, which is in the same table.
+_ANNOUNCING: Final[tuple[str, ...]] = tuple(
+    sorted({verb for table in (_TO_A_PHONE, _OVER_THE_SPEAKERS) for verb in table}
+           - {"שלח", "לשלוח", "תשלח", "שתשלח"}))
+
+
+def announces(text: str, has_message: bool) -> str:
+    """Which half of the announce pair this sentence asks for, or ``""``.
+
+    :func:`settle_audience` resolves the pair the model answered with. This is
+    the case where the model answered with neither: "תשדר ברמקולים שהאוכל
+    מוכן" came back as `media_control{next}` - the speakers were heard and
+    the message was not - and "תכריז בכל הבית שמישהו בדלת" locked every
+    door in the house, because בכל הבית is also how you say "everywhere".
+
+    Two conditions and both are needed. The sentence must carry something to
+    say - that is `slot_match.extract_message`, passed in the way
+    :func:`settle_audience` takes it - and it must name a verb that announces.
+    Neither is sufficient: a message alone reads שלח את שואב האבק as a
+    notification, 31 clauses of it.
+
+    Measured per clause over the v11 corpus on every clause where it speaks:
+    **248 agree, 0 disagree** - 160 `notify_send` and 88 `broadcast` - and it
+    is silent on the other 126 that carry a message without announcing it.
+    """
+    if not text or not has_message:
+        return ""
+    if not _hits(list(_ANNOUNCING), _tokens(text), text):
+        return ""
+    return settle_audience("", text, True)
+
+
 def settle_transport(tool: str, text: str, names_something: bool) -> str:
     """``music_play`` about a sentence that named nothing to play."""
     if tool != "music_play" or names_something or not text:
@@ -1859,6 +1896,26 @@ def settle_media(tool: str, text: str, names_a_level: bool,
     def said(words: tuple[str, ...]) -> int:
         return _hits(list(words), tokens, text)
 
+    def also_glued(words: tuple[str, ...]) -> int:
+        """:func:`said`, and then the same words again through a lost space.
+
+        The nine disagreements this function's docstring lists are all one
+        thing - a space eaten or a final letter broken, "תפסיקאת", "לשימ",
+        "השםיעי" - and round nine's reading is deaf to none of them.
+
+        **Four of the eight branches, not all of them.** Offering this to the
+        whole chain was measured and rejected: it turns a volume and a source
+        into a mute, **46 disagreements against 22 rescues**, because those
+        three branches are read *before* the rest and a false match there
+        moves the decision earlier. The two halting branches, where the strict
+        reader has already declined every other behaviour: **10 agree, 0
+        disagree**. The two skipping branches, which are read first of all and
+        so had to be measured on their own: **6 more, also none against** -
+        "תחזוראחורה" and "הרצועההקודמת", every one of them a previous
+        track that was being played as the next one.
+        """
+        return said(words) or _hits_noisy(list(words), text)
+
     sets_a_level = (which_way(text) is not None
                     and step_size(text, "volume_step_pct") is not None)
 
@@ -1867,9 +1924,9 @@ def settle_media(tool: str, text: str, names_a_level: bool,
     # to. 19 clauses on the v11 corpus, all `media_stop`, none against.
     di_stop = bool(_M_DI.search(text) and _M_STOP_VERB.search(text))
 
-    if said(_M_NEXT):
+    if also_glued(_M_NEXT):
         found = "media_next_track"
-    elif said(_M_BACK):
+    elif also_glued(_M_BACK):
         found = "media_previous_track"
     elif said(_M_MUTE):
         found = "media_mute"
@@ -1890,9 +1947,9 @@ def settle_media(tool: str, text: str, names_a_level: bool,
         # every media clause: **721 agree, 1 disagree**, the one being "מיות" -
         # speech noise inside the word the branch above matches on.
         found = "media_set_volume"
-    elif said(_M_STOP) or di_stop:
+    elif also_glued(_M_STOP) or di_stop:
         found = "media_stop"
-    elif said(_M_PAUSE):
+    elif also_glued(_M_PAUSE):
         found = "media_pause"
     elif said(_M_PLAY) and not names_a_level:
         # A level rules a play out: "שים את הנגן על שישים אחוז" sets the

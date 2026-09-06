@@ -1273,10 +1273,49 @@ def names_a_clock(query: str) -> bool:
 _GLUE_FLOOR: Final = 4
 
 
-def score_families(query: str) -> list[tuple[str, int]]:
-    """Families with a non-zero score, most likely first."""
+#: The homophones the corpus injects, four of the seven, folded onto one
+#: letter each. `data/hebrew_speech._HOMOPHONES` is the biggest of the six
+#: noise kinds - weight 34 against the lost space's 12 - and until this the
+#: router read none of it: "להדליק את המעוורר" and "שלח את שועב
+#: האבק" name a device apiece and scored nothing.
+#:
+#: **Which four, and why not all seven, is the whole of it.** Measured one pair
+#: at a time over the 27,210 rows of the v11 corpus, each is nearly free -
+#: ע→א rescues 12, ט→ת 6, ס→ש 3, ק→כ 3, ח→כ 1, צ→ז none - and ב→ו is the
+#: only one that lets anything through, eight rows. They are **not free
+#: together**: all seven let 75 off-topic sentences past and hand 34 of them a
+#: tool that can move something, because the folds compose and each one
+#: collapses more of the vocabulary than the last. The five that were clean
+#: alone still leak 24 actuating rows; dropping ח - whose target כ another
+#: pair already uses, so the two together merge three letters into one - takes
+#: that to zero at the cost of a single rescue.
+#:
+#: What is left: **24 orders rescued, 8 off-topic rows let through, and not
+#: one of the eight able to actuate** - they are the same sentence, "כמה מטר
+#: יש בקילומטר", and `looks_like_question` has already restricted it to the
+#: two read-only tools. That is the trade the room bonus made and it is the
+#: standard this gate was tuned to.
+_SPEECH_FOLD: Final = str.maketrans("טקעס", "תכאש")
+
+
+def score_families(query: str, *,
+                   hear_homophones: bool = False) -> list[tuple[str, int]]:
+    """Families with a non-zero score, most likely first.
+
+    ``hear_homophones`` folds the despaced reading below; see
+    :data:`_SPEECH_FOLD`. It is off by default and :func:`looks_off_topic` is
+    the only caller that turns it on, because the gate and the five-name
+    shortlist make opposite trades and this one is clean on the gate's terms
+    and not on the shortlist's. On the shortlist it gains gold's own tool on
+    34 clauses and **loses it on one**: מיוט folds to מיות, which is inside
+    "הכיריים יותר" once the spaces are gone, and a mute took the light's
+    place in a list of five. A gate that lets a read-only question through
+    costs nothing; a shortlist without the light costs the sentence.
+    """
     toks = _tokens(query)
     despaced = _fold(query).replace(" ", "")
+    if hear_homophones:
+        despaced = despaced.translate(_SPEECH_FOLD)
     scored = []
     for fam in FAMILY_TOOLS:
         # Nouns weigh triple: they identify the device, which is what decides
@@ -1289,7 +1328,10 @@ def score_families(query: str) -> list[tuple[str, int]]:
             # see :data:`_GLUE_FLOOR`. Last, so a noun the strict reader can
             # hear is never counted twice, and worth exactly one noun.
             nouns = int(any(
-                len(key) >= _GLUE_FLOOR and " " not in key and key in despaced
+                len(key) >= _GLUE_FLOOR and " " not in key
+                and (key in despaced
+                     or (hear_homophones
+                         and key.translate(_SPEECH_FOLD) in despaced))
                 for key in (_fold(k).strip(_PUNCT)
                             for k in FAMILY_NOUNS.get(fam, []))))
         score = (_NOUN_WEIGHT * nouns
@@ -2103,7 +2145,7 @@ def looks_off_topic(query: str, threshold: int = REFUSE_BELOW) -> bool:
     # See :data:`ASKS_ABOUT_CONTENT` and :data:`ASKS_ABOUT_THE_WORLD`.
     if _ABOUT_CONTENT.search(normalise(query)):
         return True
-    scored = score_families(query)
+    scored = score_families(query, hear_homophones=True)
     score = scored[0][1] if scored else 0
     if _ROOMS.find(query, fuzzy=False):
         score += ROOM_WEIGHT

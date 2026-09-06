@@ -4113,3 +4113,137 @@ def test_making_light_is_turning_it_on_not_toggling_it():
     assert REPAIR.settle("light_control", {"action": "flip"},
                          "תשמעי, אפשר שתעשה אוףאת הלייטס בסלון הגדול")[0] \
         == "light_turn_off"
+
+
+def test_a_sentence_that_announces_something_is_an_announcement():
+    """"תשדר ברמקולים שהאוכל מוכן" skipped to the next track.
+
+    `settle_audience` resolves the announce pair when the model answers with
+    one half of it. Here it answered with neither: the speakers were heard and
+    the message was not, so an announcement came back as a transport command -
+    and "תכריז בכל הבית שמישהו בדלת" locked every door in the house,
+    because בכל הבית is also how you say "everywhere".
+
+    Two conditions, and neither is sufficient. The clause must carry something
+    to say and it must name a verb that announces: a message alone reads
+    "שלח את שואב האבק לעגינה" as a notification, 31 clauses of it.
+    Measured per clause over the v11 corpus on every clause where it speaks:
+    **248 agree, 0 disagree**.
+    """
+    for tool, action, query in (
+            ("media_control", "next", "תקשיב, תשדר ברמקולים שהאוכל מוכן תודה"),
+            ("media_control", "pause", "תקשיב, אפשר שתשדר ברמקולים שהכביסה מוכנה"),
+            ("lock_control", "lock", "אמם, תשמע, יאללה תכריז בכל הבית שמישהו בדלת")):
+        assert REPAIR.settle(tool, {"action": action}, query)[0] == "broadcast", query
+
+    # And a phone rather than the speakers, which is the half `settle_audience`
+    # has been choosing between since round seven.
+    assert REPAIR.settle("media_control", {"action": "next"},
+                         "תשמע, תעדכן את כולם שתרדו למטה")[0] == "notify_send"
+
+    # שלח is the verb that sends a message and also sends the robot to its
+    # dock and the sound to the terrace, so it does not open this at all.
+    assert REPAIR.settle("vacuum_control", {"action": "dock"},
+                         "אוקיי, בבקשה תשלח את שואב האבק לעגינה")[0] \
+        == "vacuum_return_to_base"
+
+    # A sentence with no message is not an announcement however it is phrased.
+    assert REPAIR.settle("media_control", {"action": "next"},
+                         "תנגן את השיר הבא בסלון")[0] == "media_next_track"
+
+
+def test_the_speaker_hears_a_verb_the_lost_space_glued():
+    """"תפסיקאת המוזיקה" and "תחזוראחורה" were skipping to the next track.
+
+    `settle_media`'s own docstring lists its nine disagreements and says what
+    they are - a space eaten or a final letter broken - which is exactly what
+    round nine learned to read. This is a settler, so a false match costs a
+    behaviour and cannot cost a device, and that weaker consequence is what
+    buys the weaker test.
+
+    **Four of the eight branches, not all of them.** Offering it to the whole
+    chain turns a volume and a source into a mute, **46 disagreements against
+    22 rescues**, because mute is read before them. Halting: **10 agree, 0
+    disagree**. Skipping, which is read first of all and so was measured on its
+    own: **6 more, none against**.
+    """
+    assert DIRECTION.settle_media(
+        "media_next_track", "רגע, תקשיבי, תפסיקאת המוזיקה בבית",
+        False) == "media_pause"
+    assert DIRECTION.settle_media(
+        "media_next_track", "נו תחזוראחורה בחצר בבקשה",
+        False) == "media_previous_track"
+    # From outside `_HALT`, because that guard is deliberate: a pause and a
+    # stop are one decision the sentence rarely makes, so between those two
+    # the model's own answer stands.
+    assert DIRECTION.settle_media(
+        "media_next_track", "אמם, תקשיבי,סטופ בכניסה לבית תודה",
+        False) == "media_stop"
+    assert DIRECTION.settle_media(
+        "media_pause", "אמם, תקשיבי,סטופ בכניסה לבית תודה",
+        False) == "media_pause"
+
+    # The three branches read before these stay strict, which is the whole
+    # shape of the rule: a volume is not a mute.
+    assert DIRECTION.settle_media(
+        "media_next_track", "אני רוצה שתכוון את הקול בחדר אוכל לשישים אחוז",
+        True) == "media_set_volume"
+
+
+def test_the_gate_hears_a_device_noun_a_homophone_broke():
+    """"להדליק את המעוורר" names a fan and the gate threw it away.
+
+    The homophone is the biggest of the six noise kinds the corpus injects -
+    weight 34 against the lost space's 12 - and until now the router read none
+    of it.
+
+    **Which pairs, and why not all seven, is the whole of it.** One at a time
+    each is nearly free; together all seven let 75 off-topic sentences past
+    and hand 34 of them a tool that can move something, because the folds
+    compose. The four here rescue **24 orders and let 8 rows through, none of
+    which can actuate** - they are all "כמה מטר יש בקילומטר", which
+    `looks_like_question` has already restricted to the two read-only tools.
+
+    The gate only. On the five-name shortlist the same fold gains gold's tool
+    on 34 clauses and loses it on one, and a shortlist without the light costs
+    the whole sentence where a read-only answer costs nothing.
+    """
+    for query in ("תפתחי מעוורר בחדר רחצה",
+                  "נו בבקשה שים את מעוורר בממ\"ד על 70 אחוז"):
+        assert not ROUTER.looks_off_topic(query), query
+
+    # The shortlist is left strict, which is the point: it is asked whether
+    # gold's own tool survives, and there the same fold costs one.
+    assert ROUTER.score_families("תפתחי מעוורר בחדר רחצה") == \
+        ROUTER.score_families("תפתחי מעוורר בחדר רחצה", hear_homophones=False)
+
+    # And the gate is still a gate on the sentences it was built for.
+    for query in ("מי היה ראש הממשלה הראשון של ישראל",
+                  "כמה עולה לשכור חניה בתל אביב"):
+        assert ROUTER.looks_off_topic(query), query
+
+
+def test_the_setting_word_the_lost_space_glued_still_sets_it():
+    """"למהירות נמוךאם אפשר" names a fan speed and typed as none.
+
+    Same class as the router's, one module over - but this reader *fills a
+    slot*, so a false match invents an argument rather than costing a refusal.
+
+    Measured per clause over the v11 corpus **inside this function's own
+    scope**: asked only for slots the gold behaviour can hold. That qualifier
+    is the whole measurement - asked outside it, קירור is an hvac mode on every
+    clause that switches the machine off, 947 of them. In scope: **55 agree,
+    1 disagrees**, and the one is "את הקירור על הבלקון ייווש" - ייבוש with
+    the noise on it, so the value word is illegible and the device noun wins.
+    """
+    assert SLOT.setting_from(
+        "נו תוכל להעביר את המזגן במשרד למהירות נמוךאם אפשר", "fan_mode") == "low"
+    assert SLOT.setting_from(
+        "נו יאללה מחק את תפוחים מרשימת הקנ יות", "list") == "shopping"
+
+    # The strict reader still decides wherever it can hear, and the accusative
+    # guard that keeps "את הקירור ... מאוורר" pointing the right way is
+    # untouched: the fallback runs only where nothing at all was found.
+    assert SLOT.setting_from("תעביר את הקירור למאוורר", "hvac_mode") == "fan_only"
+    assert SLOT.setting_from("תעביר את המזגן לחימום", "hvac_mode") == "heat"
+    assert SLOT.setting_from("תדליק את האור בסלון", "hvac_mode") is None
