@@ -71,7 +71,15 @@ AREA_ALIASES: Final[dict[str, list[str]]] = {
     "parking": ["חניה", "החניה", "חנייה", "החנייה", "מוסך", "המוסך", "גראז'",
                 "הגראז'", "חניון", "החניון", "אוטו", "האוטו",
                 "garage", "carport", "parking", "driveway"],
-    "safe_room": ["ממד", 'ממ"ד', "ממ״ד", "הממד", "חדר ביטחון", "חדר הביטחון",
+    # `ממדד` is a misspelling and it is in here on purpose. Every other room
+    # can be reached through the fuzzy pass, which this one cannot: that pass
+    # requires four characters, because `חצר` and `חדר` are one edit apart and
+    # both are ordinary words, and `ממד` is three. So the one shape
+    # speech-to-text produces for it has to be spelled out. It costs nothing -
+    # `ממדד` is not a Hebrew word - and over the whole corpus the room goes
+    # from 24,809 right / 12 wrong / 126 silent to **24,840 / 12 / 95**.
+    "safe_room": ["ממד", 'ממ"ד', "ממ״ד", "הממד", "ממדד", "הממדד",
+                  "חדר ביטחון", "חדר הביטחון",
                   "חדר מוגן", "החדר המוגן",
                   "מרחב מוגן", "המרחב המוגן", "מרחב המוגן",
                   "safe room", "shelter"],

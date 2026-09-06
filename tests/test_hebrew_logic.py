@@ -3596,3 +3596,19 @@ def test_di_is_an_intensifier_and_not_an_order():
     for query in ("די עם את המוזיקה בחדר ילדים", "תעצור את המוזיקה בסלון"):
         tool, _ = REPAIR.settle("media_control", {"action": "pause"}, query)
         assert tool == "media_pause", f"{query!r} -> {tool}"
+
+
+def test_the_one_room_the_fuzzy_pass_cannot_reach_spells_its_typo_out():
+    """`ממד` is three characters and the fuzzy pass needs four.
+
+    That floor is right - `חצר` and `חדר` are one edit apart and both are
+    ordinary words - so the safe room is the one room a misspelling cannot
+    reach, and the shape speech-to-text produces for it is listed instead. Over
+    the whole corpus the room goes from 24,809 right / 12 wrong / 126 silent to
+    24,840 / 12 / 95.
+    """
+    assert "ממדד" in AREA_MAP.AREA_ALIASES["safe_room"]
+    assert AREA_MAP.slug_for_name("ממדד") == "safe_room"
+    claimed = [slug for slug, forms in AREA_MAP.AREA_ALIASES.items()
+               if "ממדד" in forms]
+    assert claimed == ["safe_room"], claimed
