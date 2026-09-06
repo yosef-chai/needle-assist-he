@@ -1263,17 +1263,33 @@ def test_a_routine_falls_back_to_its_sibling_domain_and_no_further():
     here confuse them. The registry knows, so a name absent from the domain the
     model chose is looked for in the sibling one.
 
+    A helper is the third, and it arrived from the corpus rather than from
+    the registry: "מצב חופשה" was `routine_run` in one recipe and
+    `helper_toggle` in another, and `data/repair_v11.py` settles the corpus on
+    the helper. Which one it is in a given house is this table's question. Only
+    the on direction - a scene cannot be un-activated, so there is nothing for
+    the off direction to fall through to and refusing is the right answer.
+
     Automations are excluded on purpose: `automation.turn_on` *enables* an
     automation rather than running it, so guessing wrong there would leave a
-    household with one quietly switched on.
+    household with one quietly switched on. A helper carries no such trap: an
+    `input_boolean` means on and off in the sense the sentence already said.
     """
-    assert CONST.ROUTINE_SIBLING == {"scene_activate": "script_run",
-                                     "script_run": "scene_activate"}
-    for tool, sibling in CONST.ROUTINE_SIBLING.items():
-        assert CONST.ROUTINE_SIBLING[sibling] == tool
-        assert tool in CONST.NAME_ADDRESSED and sibling in CONST.NAME_ADDRESSED
-        assert CONST.NAME_ADDRESSED[tool] != CONST.NAME_ADDRESSED[sibling]
+    assert CONST.ROUTINE_SIBLING == {
+        "scene_activate": ("script_run", "input_boolean_turn_on"),
+        "script_run": ("scene_activate", "input_boolean_turn_on"),
+        "input_boolean_turn_on": ("scene_activate", "script_run"),
+    }
+    # Symmetric, so no house can reach a routine one way and not the other.
+    for tool, siblings in CONST.ROUTINE_SIBLING.items():
+        assert tool in CONST.NAME_ADDRESSED
+        for sibling in siblings:
+            assert tool in CONST.ROUTINE_SIBLING[sibling], (tool, sibling)
+            assert sibling in CONST.NAME_ADDRESSED
+            assert CONST.NAME_ADDRESSED[tool] != CONST.NAME_ADDRESSED[sibling]
     assert not any(t.startswith("automation") for t in CONST.ROUTINE_SIBLING)
+    # And nothing to fall through to when a routine is being switched off.
+    assert "input_boolean_turn_off" not in CONST.ROUTINE_SIBLING
 
 
 def test_naming_nothing_means_all_of_them_only_for_timers():
@@ -2358,8 +2374,14 @@ def test_a_clause_that_names_nothing_is_not_an_order():
     assert not ROUTER.clause_names_nothing("תזכיר לי בעוד שעה")
     # And it is strictly inside the sentence gate: a clause the sentence gate
     # would refuse can still name something, and then it is not this gate's.
-    assert ROUTER.looks_off_topic("תזכיר לי בעוד שעה")
-    assert not ROUTER.clause_names_nothing("תזכיר לי בעוד שעה")
+    # "אור" is a girl's name as well as a light, and a reminder without a
+    # duration is a to-do this house has no tool for - see
+    # `asks_for_a_reminder`, which is why the countdown itself is no longer
+    # the example here.
+    for named_and_off_topic in ("אור זה שם יפה לילדה",
+                                "אממ, תזכיר לי לשלם ארנונה"):
+        assert ROUTER.looks_off_topic(named_and_off_topic)
+        assert not ROUTER.clause_names_nothing(named_and_off_topic)
 
 
 def test_a_question_asks_which_or_whether_and_they_differ():
@@ -3630,3 +3652,34 @@ def test_a_failed_generation_on_a_named_routine_is_rebuilt_too():
         "name": "routine_run", "arguments": {"action": "scene"}}
     # A sentence naming no routine at all is still left alone.
     assert REPAIR.recover("תדליק את האור בסלון") is None
+
+
+def test_a_countdown_is_an_order_that_names_no_device():
+    """"תזכיר לי בעוד שלוש דקות" was refused before the model ever saw it.
+
+    The refusal gate scores device nouns and a countdown has none, so the one
+    thing this house does without a device was the one thing the gate could
+    not let through. Both halves of the exception are exact and both are
+    needed: the router offers *only* the timer, so there is nothing else the
+    sentence could be, and the sentence says *how long*, which is what
+    separates a countdown from a to-do this house has no tool for.
+
+    Measured over the 27,210 rows of the shipping adapter's corpus: of the
+    3,384 the gate refuses, this rescues **53 that gold gives a call to and
+    leaks none that gold refuses**. Any-single-tool rescues 57 and leaks 450.
+    """
+    for query in ("נו תשמעי, תזכיר לי בעוד ארבעים וחמש דקות",
+                  "כאילו תשמעי, תזכיר לי בעוד שלוש דקות",
+                  "אממ, בבקשה בא לי שתזכיר לי בעוד דקה"):
+        assert ROUTER.asks_for_a_reminder(query), query
+        assert not ROUTER.looks_off_topic(query), query
+
+    # No duration is no countdown: a to-do is not something this house keeps.
+    for query in ("תזכיר לי לקנות חלב", "תזכיר לי להוציא את הכביסה"):
+        assert not ROUTER.asks_for_a_reminder(query), query
+
+    # And it is not a hole: an off-topic sentence gets a wide shortlist, so the
+    # first half of the test fails before the second is ever asked.
+    for query in ("מי ניצח במשחק אתמול", "כמה עולה לשכור חניה בתל אביב"):
+        assert not ROUTER.asks_for_a_reminder(query), query
+        assert ROUTER.looks_off_topic(query), query

@@ -1860,6 +1860,29 @@ def _sounds_like_an_order(query: str) -> bool:
     return False
 
 
+def asks_for_a_reminder(query: str) -> bool:
+    """"תזכיר לי בעוד שלוש דקות" - an order that names no device.
+
+    A countdown is the one thing this house does that has no device noun, so
+    no family score can reach it and the gate refuses the sentence before the
+    model ever sees it. Both halves of the test are needed and both are exact:
+    the router must offer **only** the timer, so there is nothing else the
+    sentence could be asking for, and the sentence must say **how long**,
+    which is what separates a countdown from "תזכיר לי לקנות חלב" - a to-do
+    this house has no tool for.
+
+    Measured over the 27,210 rows of the corpus the shipping adapter was
+    trained on. Of the 3,384 rows the gate refuses, this **rescues 53 that
+    gold gives a call to and lets through none that gold refuses.** The looser
+    version - any sentence whose shortlist holds exactly one tool - rescues 57
+    and leaks 450, which is the gate's whole purpose undone.
+    """
+    from . import slot_match  # noqa: PLC0415 - slot_match imports this module
+
+    return (select_tool_names(query, MAX_TOOLS) == ["timer_control"]
+            and bool(slot_match.duration_from(query)))
+
+
 def looks_off_topic(query: str, threshold: int = REFUSE_BELOW) -> bool:
     """True when nothing in the utterance names a device this house controls.
 
@@ -1954,6 +1977,10 @@ def looks_off_topic(query: str, threshold: int = REFUSE_BELOW) -> bool:
     # And the other sentence that names no device and is still an order.
     # See :func:`asks_for_something`.
     if asks_for_something(query):
+        return False
+    # And the third: a countdown is not a device either.
+    # See :func:`asks_for_a_reminder`.
+    if asks_for_a_reminder(query):
         return False
     # And its mirror: a question about who performed something, what a thing
     # costs or how one is installed is about the world, not about this house.
