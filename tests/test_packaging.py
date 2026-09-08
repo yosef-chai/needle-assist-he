@@ -45,6 +45,15 @@ def test_the_manifest_says_what_hacs_and_hassfest_require():
     # requirement here would be a pip install on a machine that may have no
     # compiler. Empty is deliberate; see needle_engine/VENDOR.md.
     assert manifest["requirements"] == []
+    # The minimum Home Assistant version goes in hacs.json and nowhere else.
+    # hassfest rejects a "homeassistant" key in a custom integration's manifest
+    # - it is not in CUSTOM_INTEGRATION_MANIFEST_SCHEMA - and the loader never
+    # reads one, so the copy there was both invalid and inert. HACS reads this
+    # one, and it has to keep up with what the code actually needs:
+    # OptionsFlowWithReload arrived in 2025.8.
+    assert "homeassistant" not in manifest
+    hacs = json.loads((REPO / "hacs.json").read_text(encoding="utf-8"))
+    assert hacs["homeassistant"] == "2025.8.0"
 
 
 def test_every_translation_carries_every_string():
