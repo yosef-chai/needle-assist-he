@@ -135,3 +135,44 @@ def test_the_quality_scale_record_parses_and_says_something_about_every_rule():
         # An exemption without a reason is a claim, not a record.
         if status == "exempt":
             assert entry["comment"].strip(), name
+
+
+def _assigned(path: pathlib.Path, name: str) -> object:
+    """The literal value a module assigns to ``name``, read without importing."""
+    import ast  # noqa: PLC0415
+
+    for node in ast.parse(path.read_text(encoding="utf-8")).body:
+        target = getattr(node, "target", None) or (
+            node.targets[0] if isinstance(node, ast.Assign) else None)
+        if isinstance(target, ast.Name) and target.id == name:
+            return node.value
+    raise AssertionError(f"{path.name} assigns no {name}")
+
+
+def test_the_engine_digests_are_for_the_engine_that_is_vendored():
+    """A vendored engine bump without new digests would refuse every download."""
+    import ast  # noqa: PLC0415
+
+    engine_lib = COMPONENT / "engine_lib.py"
+    fetch = COMPONENT / "needle_engine" / "agent" / "fetch.py"
+    pinned = ast.literal_eval(_assigned(engine_lib, "PINNED_VERSION"))
+    vendored = ast.literal_eval(_assigned(fetch, "ENGINE_VERSION"))
+    assert pinned == vendored
+
+    table = _assigned(engine_lib, "_PINNED")
+    assert isinstance(table, ast.Dict)
+    tags = {ast.literal_eval(key) for key in table.keys}
+    # Every tag `fetch._platform_tag` can return.
+    assert tags == {
+        f"{family}{arch}"
+        for family in ("manylinux2014_", "musllinux_1_2_")
+        for arch in ("x86_64", "aarch64")
+    } | {"macosx_11_0_arm64", "macosx_11_0_x86_64", "win_amd64", "win_arm64"}
+    for pin in table.values:
+        assert isinstance(pin, ast.Call)
+        for digest in pin.args:
+            value = ast.literal_eval(digest)
+            assert len(value) == 64 and int(value, 16) >= 0, value
+
+    revision = ast.literal_eval(_assigned(engine_lib, "_REVISION"))
+    assert len(revision) == 40 and int(revision, 16) >= 0

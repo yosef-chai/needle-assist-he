@@ -17,6 +17,13 @@ DOMAIN: Final = "needle_assist"
 # fine-tune. Resolved in an executor, never on the event loop.
 BUNDLED_WEIGHTS: Final = Path(__file__).parent / "needle_he.cact"
 
+# The assistant whose exposure settings decide what this agent may touch -
+# Settings -> Voice assistants -> Expose. The same key Home Assistant's own
+# conversation agent and its Assist LLM API filter on. Every entity this
+# component reads or actuates passes `async_should_expose` for it first; an
+# entity the household kept away from voice stays away from it here too.
+ASSISTANT: Final = "conversation"
+
 CONF_WEIGHTS: Final = "weights_path"
 CONF_LOG_UTTERANCES: Final = "log_utterances"
 CONF_MAX_TOKENS: Final = "max_new_tokens"

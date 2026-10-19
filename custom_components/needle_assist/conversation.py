@@ -19,6 +19,9 @@ from time import monotonic
 from typing import TYPE_CHECKING, Any, Final, Literal
 
 from homeassistant.components import conversation
+from homeassistant.components.homeassistant.exposed_entities import (
+    async_listen_entity_updates,
+)
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import (
     area_registry as ar,
@@ -37,6 +40,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import clause_split, repair, reply, slot_match, tool_router
 from .const import (
+    ASSISTANT,
     CONF_LOG_UTTERANCES,
     CONF_MAX_TOKENS,
     CONFIDENCE_FLOOR,
@@ -205,6 +209,12 @@ class NeedleConversationEntity(conversation.ConversationEntity):
             self.async_on_remove(
                 self.hass.bus.async_listen(event, _house_changed)
             )
+        # The entity indexes hold exposed entities only. An entity exposed or
+        # hidden in Settings -> Voice assistants without a registry entry
+        # never fires the registry event, so the exposure store is listened
+        # to directly - the same hook Home Assistant's own agent uses.
+        self.async_on_remove(async_listen_entity_updates(
+            self.hass, ASSISTANT, self._executor.slots.invalidate))
 
     @property
     def supported_languages(self) -> list[str] | Literal["*"]:

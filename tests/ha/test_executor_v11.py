@@ -13,6 +13,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from homeassistant.components.homeassistant.exposed_entities import (
+    async_expose_entity,
+)
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import entity_registry as er
@@ -71,6 +74,7 @@ def house(hass: HomeAssistant) -> dict[str, str]:
         )
         entities.async_update_entity(entry.entity_id, area_id=area.id)
         hass.states.async_set(entry.entity_id, state, attributes)
+        async_expose_entity(hass, "conversation", entry.entity_id, True)
         made[unique] = entry.entity_id
     return made
 
@@ -323,6 +327,7 @@ async def test_an_announcement_is_not_a_notification(
         "assist_satellite", "needle_test", "kitchen_sat",
         suggested_object_id="kitchen_sat")
     hass.states.async_set(entry.entity_id, "idle", {})
+    async_expose_entity(hass, "conversation", entry.entity_id, True)
     calls = async_mock_service(hass, "assist_satellite", "announce")
     outcome = await _wire(executor, "broadcast", None, {"message": "garbage"},
                           "תכריז בכל הבית שהאוכל מוכן")
@@ -438,6 +443,7 @@ async def test_a_device_inside_a_room_name_is_the_room(
         if area is not None:
             entities.async_update_entity(entry.entity_id, area_id=area.id)
         hass.states.async_set(entry.entity_id, "on", {"friendly_name": name})
+        async_expose_entity(hass, "conversation", entry.entity_id, True)
         made[unique] = entry.entity_id
 
     calls = async_mock_service(hass, "switch", "turn_off")
@@ -476,6 +482,7 @@ async def test_a_television_in_the_other_domain_is_refused_not_guessed(
                                          suggested_object_id="tv")
     entities.async_update_entity(entry.entity_id, area_id=living.id)
     hass.states.async_set(entry.entity_id, "on", {"friendly_name": "טלוויזיה"})
+    async_expose_entity(hass, "conversation", entry.entity_id, True)
 
     off = async_mock_service(hass, "media_player", "turn_off")
     outcome = await _wire(executor, "switch_control", "shut", {},
@@ -497,6 +504,7 @@ async def test_the_registry_says_whether_a_mode_is_a_helper_or_a_scene(
                                          suggested_object_id="vacation_mode")
     hass.states.async_set(entry.entity_id, "scening",
                           {"friendly_name": "מצב חופשה"})
+    async_expose_entity(hass, "conversation", entry.entity_id, True)
 
     scene = async_mock_service(hass, "scene", "turn_on")
     outcome = await _wire(executor, "helper_toggle", "on",

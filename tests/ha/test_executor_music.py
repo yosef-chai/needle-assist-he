@@ -10,6 +10,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from homeassistant.components.homeassistant.exposed_entities import (
+    async_expose_entity,
+)
 from homeassistant.core import (
     Context,
     HomeAssistant,
@@ -46,6 +49,7 @@ def _add_player(hass: HomeAssistant, unique: str, platform: str,
     if area_id:
         entities.async_update_entity(entry.entity_id, area_id=area_id)
     hass.states.async_set(entry.entity_id, "idle", {"friendly_name": unique})
+    async_expose_entity(hass, "conversation", entry.entity_id, True)
     return entry.entity_id
 
 
@@ -210,6 +214,7 @@ async def test_the_weather_is_read_off_the_weather_entity(
         "weather.home", "sunny",
         {"friendly_name": "מזג אוויר", "temperature": 28},
     )
+    async_expose_entity(hass, "conversation", "weather.home", True)
 
     outcome = await _run(_executor(hass), "get_weather", {}, "מה מזג האוויר")
 
@@ -236,6 +241,7 @@ async def test_a_sensor_reading_is_spoken_with_its_unit(
         entry.entity_id, "23.5",
         {"friendly_name": "טמפרטורה סלון", "unit_of_measurement": "°C"},
     )
+    async_expose_entity(hass, "conversation", entry.entity_id, True)
 
     # "מה הטמפרטורה" is routed to `climate` on purpose - asking the temperature
     # of a room usually means the thermostat, not a bare sensor - so this asks
@@ -264,6 +270,7 @@ async def test_asking_about_tomorrow_reads_the_forecast_and_not_today(
         {"friendly_name": "מזג אוויר", "temperature": 28,
          "supported_features": 1},
     )
+    async_expose_entity(hass, "conversation", "weather.home", True)
 
     async def _forecasts(call: ServiceCall) -> dict[str, Any]:
         return {"weather.home": {"forecast": [
@@ -304,6 +311,7 @@ async def test_a_forecast_that_cannot_be_had_is_said_rather_than_faked(
         "weather.home", "sunny",
         {"friendly_name": "מזג אוויר", "temperature": 28},
     )
+    async_expose_entity(hass, "conversation", "weather.home", True)
     outcome = await _run(_executor(hass), "get_weather", {}, "ירד גשם מחר")
     assert not outcome.ok
 

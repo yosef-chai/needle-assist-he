@@ -8,6 +8,7 @@ engine returns something broken, which on Hebrew it does.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import pathlib
@@ -222,41 +223,144 @@ def test_an_unparseable_envelope_says_so() -> None:
 
 # -- fetching the native library ----------------------------------------------
 
+LIBRARY = b"the native library"
 
-def test_an_engine_already_on_disk_is_not_downloaded_again(
-    tmp_path: pathlib.Path
-) -> None:
+
+def _wheel_bytes(payload: bytes = LIBRARY) -> bytes:
+    """A wheel holding ``payload`` where this machine's library belongs."""
+    from custom_components.needle_assist.needle_engine.agent import fetch
+
+    member = "needle/" + fetch._lib_name_for(fetch._platform_tag())
+    wheel = io.BytesIO()
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr(member, payload)
+    return wheel.getvalue()
+
+
+def _sha(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+@pytest.fixture
+def pinned(monkeypatch: pytest.MonkeyPatch) -> bytes:
+    """Pin this machine's platform to a stand-in wheel; return its bytes.
+
+    The real digests belong to 14 MB libraries nobody downloads in a test, so
+    the table is pointed at the stand-in instead. What is under test is that
+    the table is consulted, not what is in it.
+    """
+    from custom_components.needle_assist.needle_engine.agent import fetch
+
+    wheel = _wheel_bytes()
+    monkeypatch.setitem(engine_lib._PINNED, fetch._platform_tag(),
+                        engine_lib._Pin(_sha(wheel), _sha(LIBRARY)))
+    return wheel
+
+
+def _urlopen(body: bytes) -> MagicMock:
+    response = MagicMock()
+    response.read.return_value = body
+    response.__enter__ = lambda self: self
+    response.__exit__ = lambda *args: None
+    return response
+
+
+def _on_disk(tmp_path: pathlib.Path, payload: bytes) -> pathlib.Path:
     target = engine_lib.library_path(str(tmp_path))
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(b"already here")
+    target.write_bytes(payload)
+    return target
+
+
+def test_the_wheel_comes_from_one_fixed_commit_not_from_main() -> None:
+    """`resolve/main` is whatever the repository holds on the day of install."""
+    url = engine_lib._wheel_for_this_machine().url
+    assert "/resolve/main/" not in url
+    assert f"/resolve/{engine_lib._REVISION}/" in url
+    assert len(engine_lib._REVISION) == 40
+    int(engine_lib._REVISION, 16)
+
+
+def test_an_engine_already_on_disk_is_not_downloaded_again(
+    tmp_path: pathlib.Path, pinned: bytes
+) -> None:
+    target = _on_disk(tmp_path, LIBRARY)
 
     with patch("urllib.request.urlopen", side_effect=AssertionError("downloaded!")):
         assert engine_lib.ensure_library(str(tmp_path)) == str(target)
 
 
+def test_a_library_on_disk_that_is_not_the_release_is_replaced(
+    tmp_path: pathlib.Path, pinned: bytes
+) -> None:
+    """Swapped, truncated or copied from the wrong wheel: never loaded."""
+    target = _on_disk(tmp_path, b"something else entirely")
+
+    with patch("urllib.request.urlopen", return_value=_urlopen(pinned)) as fetched:
+        assert engine_lib.ensure_library(str(tmp_path)) == str(target)
+
+    fetched.assert_called_once()
+    assert target.read_bytes() == LIBRARY
+
+
 def test_the_library_is_extracted_from_the_wheel_and_renamed_into_place(
-    tmp_path: pathlib.Path
+    tmp_path: pathlib.Path, pinned: bytes
 ) -> None:
     """Written beside the target and renamed, so a broken download is never loaded."""
-    from custom_components.needle_assist.needle_engine.agent import fetch
-
-    tag = fetch._platform_tag()
-    member = "needle/" + fetch._lib_name_for(tag)
-    wheel = io.BytesIO()
-    with zipfile.ZipFile(wheel, "w") as archive:
-        archive.writestr(member, b"the native library")
-
-    response = MagicMock()
-    response.read.return_value = wheel.getvalue()
-    response.__enter__ = lambda self: self
-    response.__exit__ = lambda *args: None
-
-    with patch("urllib.request.urlopen", return_value=response):
+    with patch("urllib.request.urlopen", return_value=_urlopen(pinned)):
         path = engine_lib.ensure_library(str(tmp_path))
 
-    assert pathlib.Path(path).read_bytes() == b"the native library"
+    assert pathlib.Path(path).read_bytes() == LIBRARY
     # No .part file survives.
     assert not list(pathlib.Path(path).parent.glob("*.part"))
+
+
+def test_a_wheel_that_is_not_the_release_is_refused_before_anything_is_written(
+    tmp_path: pathlib.Path, pinned: bytes
+) -> None:
+    tampered = _wheel_bytes(b"a different library")
+
+    with (
+        patch("urllib.request.urlopen", return_value=_urlopen(tampered)),
+        pytest.raises(RuntimeError, match="SHA-256"),
+    ):
+        engine_lib.ensure_library(str(tmp_path))
+
+    assert not engine_lib.library_path(str(tmp_path)).exists()
+    assert not list(tmp_path.rglob("*.part"))
+
+
+def test_a_library_that_is_not_the_release_is_refused_even_in_the_right_wheel(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both digests are checked: the wheel's alone would trust its contents."""
+    from custom_components.needle_assist.needle_engine.agent import fetch
+
+    wheel = _wheel_bytes(b"a different library")
+    monkeypatch.setitem(engine_lib._PINNED, fetch._platform_tag(),
+                        engine_lib._Pin(_sha(wheel), _sha(LIBRARY)))
+
+    with (
+        patch("urllib.request.urlopen", return_value=_urlopen(wheel)),
+        pytest.raises(RuntimeError, match="library's SHA-256"),
+    ):
+        engine_lib.ensure_library(str(tmp_path))
+
+    assert not engine_lib.library_path(str(tmp_path)).exists()
+
+
+def test_a_platform_with_no_digest_gets_no_engine(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from custom_components.needle_assist.needle_engine.agent import fetch
+
+    monkeypatch.delitem(engine_lib._PINNED, fetch._platform_tag())
+
+    with (
+        patch("urllib.request.urlopen", side_effect=AssertionError("downloaded!")),
+        pytest.raises(RuntimeError, match="no verified Needle engine"),
+    ):
+        engine_lib.ensure_library(str(tmp_path))
 
 
 def test_a_download_that_fails_explains_how_to_do_it_by_hand(
@@ -270,11 +374,9 @@ def test_a_download_that_fails_explains_how_to_do_it_by_hand(
 
 
 def test_binding_points_the_vendored_loader_at_our_copy(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, pinned: bytes
 ) -> None:
-    target = engine_lib.library_path(str(tmp_path))
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(b"the native library")
+    target = _on_disk(tmp_path, LIBRARY)
     monkeypatch.delenv("NEEDLE_LIB_PATH", raising=False)
 
     assert engine_lib.bind_library(str(tmp_path)) == str(target)
@@ -286,35 +388,36 @@ def test_binding_points_the_vendored_loader_at_our_copy(
 
 
 async def test_the_only_network_call_goes_through_the_shared_session(
-    hass: Any, aioclient_mock: Any, tmp_path: pathlib.Path
+    hass: Any, aioclient_mock: Any, tmp_path: pathlib.Path, pinned: bytes
 ) -> None:
     """Once per engine version, on a fresh install, and never again."""
-    from custom_components.needle_assist.needle_engine.agent import fetch
-
-    tag = fetch._platform_tag()
-    member = "needle/" + fetch._lib_name_for(tag)
-    wheel = io.BytesIO()
-    with zipfile.ZipFile(wheel, "w") as archive:
-        archive.writestr(member, b"the native library")
-
-    url = engine_lib._wheel_for_this_machine().url
-    aioclient_mock.get(url, content=wheel.getvalue())
+    aioclient_mock.get(engine_lib._wheel_for_this_machine().url, content=pinned)
 
     path = await engine_lib.async_ensure_library(hass, str(tmp_path))
 
-    assert pathlib.Path(path).read_bytes() == b"the native library"
+    assert pathlib.Path(path).read_bytes() == LIBRARY
     assert len(aioclient_mock.mock_calls) == 1
 
 
 async def test_an_engine_already_on_disk_is_never_fetched(
-    hass: Any, aioclient_mock: Any, tmp_path: pathlib.Path
+    hass: Any, aioclient_mock: Any, tmp_path: pathlib.Path, pinned: bytes
 ) -> None:
-    target = engine_lib.library_path(str(tmp_path))
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(b"already here")
+    target = _on_disk(tmp_path, LIBRARY)
 
     assert await engine_lib.async_ensure_library(hass, str(tmp_path)) == str(target)
     assert aioclient_mock.mock_calls == []
+
+
+async def test_a_tampered_download_over_the_shared_session_is_refused(
+    hass: Any, aioclient_mock: Any, tmp_path: pathlib.Path, pinned: bytes
+) -> None:
+    aioclient_mock.get(engine_lib._wheel_for_this_machine().url,
+                       content=_wheel_bytes(b"a different library"))
+
+    with pytest.raises(RuntimeError, match="SHA-256"):
+        await engine_lib.async_ensure_library(hass, str(tmp_path))
+
+    assert not engine_lib.library_path(str(tmp_path)).exists()
 
 
 async def test_a_failed_fetch_explains_how_to_install_it_by_hand(

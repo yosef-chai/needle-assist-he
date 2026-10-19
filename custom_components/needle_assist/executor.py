@@ -38,11 +38,20 @@ at all - "תכבה את האור" returns ``area="terrace"`` from a live engine.
 Entity matching uses Home Assistant's own ``intent.async_match_targets`` rather
 than a hand-rolled registry walk, so exposure settings, duplicate names and
 device-class handling behave exactly as they do for built-in intents.
+
+**Only what is exposed to Assist is ever a candidate.** Every path below -
+named devices, rooms, scenes by slug, every timer, every satellite, every
+notifier, the Music Assistant players, the weather - is filtered through
+``async_should_expose`` for the conversation assistant, and nothing widens
+past it when it finds nothing. Locks, scripts and timers are not exposed by
+default, and a household that kept its front door away from voice has to be
+able to rely on that. See :func:`slot_match.exposed`.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 from time import monotonic
 from typing import Any
@@ -66,6 +75,7 @@ from . import repair, slot_match, tool_router
 from .const import (
     ACTION_ARG,
     ALL_WHEN_UNNAMED,
+    ASSISTANT,
     CONF_MUSIC_PLAYER,
     DEVICE_CLASS_DOMAINS,
     FALLBACK_DOMAINS,
@@ -310,26 +320,28 @@ class CallExecutor:
 
     def _constrained(self, domain: str, area_name: str | None,
                      classes: list[str] | None) -> list[str]:
+        """Exposed entities only. A room whose light is not exposed has no
+        light as far as this agent is concerned - there is no second try
+        without the filter."""
         constraints = intent.MatchTargetsConstraints(
             domains=[domain],
             area_name=area_name,
             device_classes=classes,
-            assistant="conversation",
+            assistant=ASSISTANT,
         )
         result = intent.async_match_targets(self.hass, constraints)
         if not result.is_match:
-            # Retry without the assistant filter: entities that were never
-            # explicitly exposed would otherwise be invisible, which reads to
-            # the user as "the model is broken" rather than "this is unexposed".
-            result = intent.async_match_targets(
-                self.hass,
-                intent.MatchTargetsConstraints(domains=[domain],
-                                               area_name=area_name,
-                                               device_classes=classes),
-            )
-        if not result.is_match:
             return []
         return [state.entity_id for state in result.states]
+
+    def _exposed(self, entity_ids: Iterable[str]) -> list[str]:
+        """``entity_ids`` without the ones the household kept from Assist."""
+        return [eid for eid in entity_ids
+                if slot_match.exposed(self.hass, eid)]
+
+    def _exposed_in(self, domain: str) -> list[str]:
+        """Every exposed entity of ``domain``."""
+        return self._exposed(self.hass.states.async_entity_ids(domain))
 
     def _match_named(self, domain: str, utterance: str,
                      fallback: str | None) -> list[str]:
@@ -353,10 +365,12 @@ class CallExecutor:
         want = str(name).strip().casefold().replace(" ", "_")
         exact = f"{domain}.{want}"
         if self.hass.states.get(exact):
-            return [exact]
+            return self._exposed([exact])
 
         hits = []
         for state in self.hass.states.async_all(domain):
+            if not slot_match.exposed(self.hass, state.entity_id):
+                continue
             object_id = state.entity_id.split(".", 1)[1].casefold()
             friendly = str(state.attributes.get("friendly_name", "")).casefold()
             if (want in (object_id, friendly)
@@ -534,8 +548,7 @@ class CallExecutor:
             if (not entity_ids and not args.get("name")
                     and tool in ALL_WHEN_UNNAMED):
                 # "cancel the timer" with nothing to disambiguate: all of them.
-                entity_ids = [s.entity_id
-                              for s in self.hass.states.async_all(named_domain)]
+                entity_ids = self._exposed_in(named_domain)
         elif tool == "broadcast":
             # `HassBroadcast` -> `assist_satellite.announce`. Same rule as
             # notify_send: the words come out of the sentence, never out of
@@ -544,8 +557,7 @@ class CallExecutor:
             # this speaks out loud in the house, that one buzzes a phone.
             if not slot_match.extract_message(utterance):
                 return CallOutcome(tool, False, "no message in the sentence")
-            entity_ids = [st.entity_id
-                          for st in self.hass.states.async_all("assist_satellite")]
+            entity_ids = self._exposed_in("assist_satellite")
         elif tool in LIST_INTEGRATIONS["todo"]:
             return await self._edit_list(tool, args, context, utterance)
         elif tool == "notify_send":
@@ -555,7 +567,7 @@ class CallExecutor:
             # notifying a phone with whatever survived decoding.
             if not slot_match.extract_message(utterance):
                 return CallOutcome(tool, False, "no message in the sentence")
-            entity_ids = [s.entity_id for s in self.hass.states.async_all("notify")]
+            entity_ids = self._exposed_in("notify")
         else:
             # A device named outright beats the room it stands in.
             entity_ids = (self.slots.entities(utterance, target)
@@ -643,6 +655,10 @@ class CallExecutor:
         entity_ids = self.slots.list_entities(utterance, wanted)
         if entity_ids:
             kind = "todo"
+        elif self._shopping_list_hidden():
+            # The legacy service writes to the same list its `todo` entity
+            # shows, so going through it would reach a list kept from Assist.
+            return CallOutcome(tool, False, "no list in this installation")
         elif self.hass.services.has_service("shopping_list", "add_item"):
             kind, entity_ids = "shopping", []
         else:
@@ -654,6 +670,13 @@ class CallExecutor:
             data["entity_id"] = entity_ids
         return await self._call(domain, service, data, context, tool,
                                 max(len(entity_ids), 1))
+
+    def _shopping_list_hidden(self) -> bool:
+        """Does the `shopping_list` integration's own list exist, unexposed?"""
+        return any(
+            entry.domain == "todo" and entry.platform == "shopping_list"
+            and not slot_match.exposed(self.hass, entry.entity_id)
+            for entry in er.async_get(self.hass).entities.values())
 
     # -- music --------------------------------------------------------------
     def _music_players(self, area_ids: list[str], all_areas: bool) -> list[str]:
@@ -672,6 +695,7 @@ class CallExecutor:
             if entry.domain == "media_player"
             and entry.platform == MUSIC_INTEGRATION
             and not entry.disabled_by
+            and slot_match.exposed(self.hass, entry.entity_id)
         ]
         if not players or all_areas or not area_ids:
             return players
@@ -810,7 +834,9 @@ class CallExecutor:
             return self._answer_timer(tool, args, utterance)
 
         if tool == "get_weather":
-            states = self.hass.states.async_all("weather")
+            # Exposed only, as Home Assistant's own `HassGetWeather` does.
+            states = [st for st in self.hass.states.async_all("weather")
+                      if slot_match.exposed(self.hass, st.entity_id)]
             if not states:
                 return CallOutcome(tool, False, "no weather entity")
             st = states[0]
@@ -906,8 +932,7 @@ class CallExecutor:
         """How long is left on a countdown, and whether one is running."""
         entity_ids = self._match_named("timer", utterance, args.get("name"))
         if not entity_ids:
-            entity_ids = [st.entity_id
-                          for st in self.hass.states.async_all("timer")]
+            entity_ids = self._exposed_in("timer")
         running = []
         for eid in entity_ids:
             state = self.hass.states.get(eid)

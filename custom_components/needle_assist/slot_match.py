@@ -56,6 +56,7 @@ from .area_map import (
     floor_slug_for_name,
     slug_for_name,
 )
+from .const import ASSISTANT
 from .hebrew_text import PhraseIndex, normalise
 from .tool_router import _GLUE_FLOOR, FAMILY_NOUNS, _fold, _hits, _tokens, _variants
 
@@ -1667,6 +1668,22 @@ def build_area_index(areas: Iterable[tuple[str, str, Iterable[str]]]) -> PhraseI
     return index
 
 
+def exposed(hass: Any, entity_id: str) -> bool:
+    """May this agent see or touch ``entity_id``?
+
+    Home Assistant's own answer, for the assistant this agent is: Settings ->
+    Voice assistants -> Expose. Every candidate goes through it - the phrase
+    index, the room match, the lists, the timers, the speakers - because a
+    lock kept away from voice has to stay out of reach of "תפתח את המנעול" no
+    matter which path found it.
+    """
+    from homeassistant.components.homeassistant.exposed_entities import (  # noqa: PLC0415
+        async_should_expose,
+    )
+
+    return bool(async_should_expose(hass, ASSISTANT, entity_id))
+
+
 class SlotIndex:
     """Phrase indexes over one installation, rebuilt when its registries change.
 
@@ -1675,7 +1692,8 @@ class SlotIndex:
     :meth:`invalidate` is wired to the registry-updated events in
     ``__init__.py``. Nothing here is written to disk: the registries are the
     single source of truth and a stale copy would send commands to a room that
-    was renamed an hour ago.
+    was renamed an hour ago. The entity indexes hold exposed entities only, so
+    a change to what is exposed has to invalidate them too.
     """
 
     def __init__(self, hass: Any) -> None:
@@ -1816,7 +1834,8 @@ class SlotIndex:
         named = [m.value for m in self._entity_index("todo").find_all(utterance)]
         if named:
             return named
-        states = self.hass.states.async_all("todo")
+        states = [state for state in self.hass.states.async_all("todo")
+                  if exposed(self.hass, state.entity_id)]
         if len(states) == 1:
             return [states[0].entity_id]
         if kind:
@@ -1903,6 +1922,11 @@ class SlotIndex:
         blocked = _blocked_forms()
         index = PhraseIndex()
         for state in self.hass.states.async_all(domain):
+            # Unexposed entities are left out of the index rather than
+            # filtered out of its answers: a name nobody may address must not
+            # claim the words of one that can be, either.
+            if not exposed(self.hass, state.entity_id):
+                continue
             # Every one of these can be something other than a string.
             # ``entry.original_name`` in particular comes back as Home
             # Assistant's ``ComputedNameType`` sentinel for entities that
@@ -1983,9 +2007,13 @@ class SlotIndex:
             })
 
         orphans = []
+        hidden = []
         for state in self.hass.states.async_all():
             domain = state.entity_id.split(".", 1)[0]
             if domain not in NAMEABLE_DOMAINS:
+                continue
+            if not exposed(self.hass, state.entity_id):
+                hidden.append(state.entity_id)
                 continue
             entry = registry.async_get(state.entity_id)
             if entry is None or entry.area_id or (
@@ -2000,6 +2028,9 @@ class SlotIndex:
             # Home Assistant's model, not this integration's, but it is the
             # single most common reason a working install looks broken.
             "entities_without_an_area": sorted(orphans),
+            # The other reason a device "is not found": it is not exposed to
+            # Assist, and nothing here will reach it until it is.
+            "entities_not_exposed": sorted(hidden),
         }
 
 

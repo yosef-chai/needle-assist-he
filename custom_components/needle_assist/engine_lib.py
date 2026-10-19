@@ -5,7 +5,17 @@ The Python half of Needle is vendored in ``needle_engine/`` (see its
 compiled inference engine, published per platform as a wheel alongside the
 model on Hugging Face. This module is the only thing standing between the two.
 
-Three decisions are worth stating, because none of them is the obvious one.
+Four decisions are worth stating, because none of them is the obvious one.
+
+**What is loaded is what was released, byte for byte.**
+The library is loaded into the Home Assistant process with ``ctypes``, so it
+runs with every permission Home Assistant has. The wheel is fetched from one
+fixed Hugging Face commit rather than from ``main``, and both the wheel and the
+library inside it are checked against SHA-256 digests kept in this file before
+anything is written. The library already on disk is checked again before every
+load, so a file swapped or truncated after install is replaced rather than run.
+``main`` is not a release: upstream has replaced the binaries of an already
+published engine version in place more than once.
 
 **The library lives under ``/config``, not under ``~/.cache``.**
 Upstream's ``_library_path`` caches it in the home directory. In a Home
@@ -31,11 +41,13 @@ Nothing here reaches the network if the library is already in place, which is
 the normal case after first setup. An installation that must stay offline from
 the start can have the file copied in by hand: put the right
 ``libneedle.{so,dll,dylib}`` at the path :func:`library_path` reports and this
-module will simply find it.
+module will find it - provided it is the released file, which the digest
+decides.
 """
 
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 import os
@@ -54,8 +66,11 @@ from .needle_engine.agent import fetch
 _LOGGER = logging.getLogger(__name__)
 
 # Where the engine wheels are published. Same host, repo and path that
-# `huggingface_hub` resolves to; `resolve/main` is the raw-file endpoint.
-_WHEEL_URL = "https://huggingface.co/{repo}/resolve/main/python/{wheel}"
+# `huggingface_hub` resolves to, at one fixed commit: the one that last wrote
+# the 2.0.2 wheels (2026-08-14). `resolve/main` would be whatever the repository
+# holds on the day of install, and it has replaced published binaries since.
+_REVISION: Final = "17a803d95928ba33d3e9a0160e024d9565b5c3f2"
+_WHEEL_URL = "https://huggingface.co/{repo}/resolve/{revision}/python/{wheel}"
 
 # One subdirectory per engine version, because a `.cact` archive is only
 # loadable by the engine version it was exported with. Keeping old versions
@@ -70,6 +85,49 @@ ENGINE_VERSION: Final[str] = fetch.ENGINE_VERSION
 HF_REPO: Final[str] = fetch.HF_REPO
 
 _TIMEOUT = 120
+
+
+class _Pin(NamedTuple):
+    """SHA-256 of one platform's wheel, and of the library inside it."""
+
+    wheel: str
+    library: str
+
+
+# The engine version the digests below were taken from. A vendored engine bump
+# without new digests fails `tests/test_packaging.py` rather than shipping a
+# component that refuses every download.
+PINNED_VERSION: Final = "2.0.2"
+
+# Computed from the wheels at `_REVISION`; the wheel digests are also the LFS
+# object ids Hugging Face reports for those files. A platform missing from this
+# table gets no engine at all rather than an unchecked one.
+_PINNED: Final[dict[str, _Pin]] = {
+    "manylinux2014_x86_64": _Pin(
+        "ba42809fadb7b2fe1aebc0af6c7560ddbe5ddea84b7875d12c0750770eb39f14",
+        "dc9c89ec3038ad60b0e6e8162a9c7d2053d251e4846f40ef9b1db061556314a5"),
+    "manylinux2014_aarch64": _Pin(
+        "002aa4653a2152725ad040289915912dd62afedfbb485b7ffd73cd9ce7abe82a",
+        "119e887de48672a69600344c24b0ea0447895bb083c53698a5b44c84943f7f94"),
+    "musllinux_1_2_x86_64": _Pin(
+        "c48873e3c2a19d4c421b48b2bcb6ae7ff7001d2ae705f6cb3508e8784c4a994b",
+        "33860917572dfa0b74fd08e4be5da8296bc7075a10d31bcd521a8ff0c580cb43"),
+    "musllinux_1_2_aarch64": _Pin(
+        "7135f89d4d1586e3034c3f59dcbc76a3e4e5b3b3d142f5c7fc54c65f5adaf732",
+        "56bbe718fe9b3597a41ce450df103b20cb119b8d9a3f8496b87819a182f14295"),
+    "macosx_11_0_arm64": _Pin(
+        "5ef0caf9b1bbef91e3e6c3eef180440a4d53e4a06dda7b409247efcc4cb55ad8",
+        "f8ff35e0ceea5812f3f90bddbb40ca3a8d03af07c84555e116bf0096fa994afd"),
+    "macosx_11_0_x86_64": _Pin(
+        "ceb0cd52abf3a20c0e5196c2e09a55532fc1bf6a931aca02d133c4bf1883b7e2",
+        "ba057bc297de4f06e6c4fd8e7a477da38bdbdd613a95342c8eb858df4511237f"),
+    "win_amd64": _Pin(
+        "718955a433f4c16c193266a37627dd34167389fa55d0c385a2a38064a5691403",
+        "ec6f681d86e7a31ee81d02930b8bc5abf7b1a8da25b6c24dd3188fd62e950f13"),
+    "win_arm64": _Pin(
+        "a4b13c0959c7dac5e789cd9da1a09a76fa6b19be570fa17556e869300872bd6e",
+        "f79ae4297b4cea7a1b85f2827f96c23bf1f7cd12d455067d6c4dcc1b27e82c9b"),
+}
 
 
 def cache_dir(config_path: str) -> Path:
@@ -91,6 +149,7 @@ class _Wheel(NamedTuple):
     url: str
     member: str
     tag: str
+    pin: _Pin
 
 
 def _wheel_for_this_machine() -> _Wheel:
@@ -102,9 +161,38 @@ def _wheel_for_this_machine() -> _Wheel:
     architecture logic has exactly one definition.
     """
     tag: str = fetch._platform_tag()
+    if (pin := _PINNED.get(tag)) is None:
+        raise RuntimeError(
+            f"no verified Needle engine {ENGINE_VERSION} for this platform "
+            f"({tag}); supported: {', '.join(sorted(_PINNED))}")
     wheel = f"cactus_needle-{ENGINE_VERSION}-py3-none-{tag}.whl"
     member: str = "needle/" + fetch._lib_name_for(tag)
-    return _Wheel(_WHEEL_URL.format(repo=HF_REPO, wheel=wheel), member, tag)
+    url = _WHEEL_URL.format(repo=HF_REPO, revision=_REVISION, wheel=wheel)
+    return _Wheel(url, member, tag, pin)
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _present(target: Path) -> bool:
+    """Is the released library already at ``target``?
+
+    Blocking: reads about 14 MB. A file that is there and does not match is
+    removed, so the caller fetches the released one in its place - a library
+    that differs from the release is never handed to ``ctypes``, whether it
+    was swapped, truncated or copied in by hand from the wrong wheel.
+    """
+    if not target.is_file():
+        return False
+    wheel = _wheel_for_this_machine()
+    if _sha256(target.read_bytes()) == wheel.pin.library:
+        return True
+    _LOGGER.warning(
+        "%s does not match the released Needle engine %s for %s; replacing it",
+        target, ENGINE_VERSION, wheel.tag)
+    target.unlink()
+    return False
 
 
 def _by_hand(wheel: _Wheel, target: Path, err: object) -> str:
@@ -120,16 +208,26 @@ def _by_hand(wheel: _Wheel, target: Path, err: object) -> str:
 def _install(target: Path, archive_bytes: bytes, wheel: _Wheel) -> str:
     """Take the library out of a downloaded wheel and put it in place.
 
-    Blocking: unzips and writes. Written beside the target and renamed, so an
-    interrupted install can never leave a half-written .so for ctypes to load
-    on the next start.
+    Blocking: unzips and writes. Both digests are checked before anything
+    touches the disk, and the file is written beside the target and renamed,
+    so neither a tampered download nor an interrupted install can leave a
+    library for ctypes to load on the next start.
     """
-    target.parent.mkdir(parents=True, exist_ok=True)
+    if (got := _sha256(archive_bytes)) != wheel.pin.wheel:
+        raise RuntimeError(_by_hand(
+            wheel, target,
+            f"the wheel's SHA-256 is {got}, expected {wheel.pin.wheel}"))
     try:
         with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
             payload = archive.read(wheel.member)
     except Exception as err:
         raise RuntimeError(_by_hand(wheel, target, err)) from err
+    if (got := _sha256(payload)) != wheel.pin.library:
+        raise RuntimeError(_by_hand(
+            wheel, target,
+            f"the library's SHA-256 is {got}, expected {wheel.pin.library}"))
+
+    target.parent.mkdir(parents=True, exist_ok=True)
 
     staged = target.with_suffix(target.suffix + ".part")
     staged.write_bytes(payload)
@@ -150,7 +248,7 @@ async def async_ensure_library(hass: HomeAssistant, config_path: str) -> str:
     simply the right way to make an HTTP request inside Home Assistant.
     """
     target = library_path(config_path)
-    if await hass.async_add_executor_job(target.exists):
+    if await hass.async_add_executor_job(_present, target):
         _LOGGER.debug("engine already present at %s", target)
         return str(target)
 
@@ -179,7 +277,7 @@ def ensure_library(config_path: str) -> str:
     :func:`async_ensure_library` is the one that runs on a live instance.
     """
     target = library_path(config_path)
-    if target.exists():
+    if _present(target):
         _LOGGER.debug("engine already present at %s", target)
         return str(target)
 

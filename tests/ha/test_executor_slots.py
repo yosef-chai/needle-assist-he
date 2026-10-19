@@ -9,6 +9,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from homeassistant.components.homeassistant.exposed_entities import (
+    async_expose_entity,
+)
 from homeassistant.core import Context, HomeAssistant, ServiceCall
 from homeassistant.helpers import (
     area_registry as ar,
@@ -45,6 +48,7 @@ def _entity(hass: HomeAssistant, domain: str, object_id: str, state: str,
     if area_id:
         entities.async_update_entity(entry.entity_id, area_id=area_id)
     hass.states.async_set(entry.entity_id, state, attributes or {})
+    async_expose_entity(hass, "conversation", entry.entity_id, True)
     return entry.entity_id
 
 

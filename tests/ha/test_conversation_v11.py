@@ -20,6 +20,9 @@ from unittest.mock import patch
 
 import pytest
 from homeassistant.components import conversation
+from homeassistant.components.homeassistant.exposed_entities import (
+    async_expose_entity,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Context, HomeAssistant, ServiceCall
 from homeassistant.helpers import area_registry as ar
@@ -54,6 +57,7 @@ def house(hass: HomeAssistant) -> dict[str, str]:
         )
         entities.async_update_entity(entry.entity_id, area_id=area.id)
         hass.states.async_set(entry.entity_id, state, attributes)
+        async_expose_entity(hass, "conversation", entry.entity_id, True)
         made[unique] = entry.entity_id
     return made
 
