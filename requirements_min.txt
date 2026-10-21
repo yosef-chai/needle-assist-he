@@ -1,0 +1,11 @@
+# The oldest Home Assistant this integration claims to support (hacs.json), so
+# the claim is tested rather than assumed. 0.13.269 pins core 2025.8.0, the
+# release that added OptionsFlowWithReload.
+pytest-homeassistant-custom-component==0.13.269
+
+# What `conversation` asks for in 2025.8.0.
+hassil==2.2.3
+home-assistant-intents==2025.7.30
+
+# Not ours: 2025.8.0's aiodns 3.5.0 breaks on import with pycares 5.
+pycares<5

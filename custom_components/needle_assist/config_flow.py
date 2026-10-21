@@ -26,7 +26,12 @@ from __future__ import annotations
 import os
 from typing import Any
 
-import voluptuous as vol
+try:
+    # Home Assistant validates with Probatio since 2026.9 and imports it by
+    # that name. Before 2026.9 there is only voluptuous, which has the same API.
+    import probatio as vol
+except ImportError:
+    import voluptuous as vol  # type: ignore[no-redef]
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,

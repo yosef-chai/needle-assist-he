@@ -14,14 +14,24 @@ file.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import voluptuous as vol
+try:
+    # Home Assistant validates with Probatio since 2026.9 and imports it by
+    # that name. Before 2026.9 there is only voluptuous, which has the same API.
+    import probatio as vol
+except ImportError:
+    import voluptuous as vol  # type: ignore[no-redef]
 from homeassistant.components.repairs import RepairsFlow
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResult
 
 from .const import CONF_WEIGHTS, DOMAIN, ISSUE_WEIGHTS_MISSING
+
+if TYPE_CHECKING:
+    # 2026.10 gave repair steps their own result type. Earlier versions do not
+    # have it, so it is imported for the type checker only; the annotations are
+    # never evaluated at runtime.
+    from homeassistant.components.repairs import RepairsFlowResult
 
 
 class WeightsMissingRepairFlow(RepairsFlow):
@@ -32,12 +42,12 @@ class WeightsMissingRepairFlow(RepairsFlow):
 
     async def async_step_init(
         self, user_input: dict[str, str] | None = None
-    ) -> FlowResult:
+    ) -> RepairsFlowResult:
         return await self.async_step_confirm()
 
     async def async_step_confirm(
         self, user_input: dict[str, str] | None = None
-    ) -> FlowResult:
+    ) -> RepairsFlowResult:
         entries = self.hass.config_entries.async_entries(DOMAIN)
         if not entries:
             # The household removed the integration while the issue was open.

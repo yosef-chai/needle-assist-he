@@ -69,11 +69,22 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          # Home Assistant 2026.8 source uses PEP 696 defaults on generic
-          # classes, which no earlier interpreter can parse.
+          # Home Assistant 2026.10 requires Python 3.14.2 or later.
           python-version: "3.14"
       - run: pip install -r requirements_test.txt
       - name: Tests, with coverage
         run: python -m pytest tests -q --cov
       - name: mypy --strict
         run: mypy custom_components/needle_assist/
+
+  oldest:
+    name: tests on the oldest supported Home Assistant
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          # What Home Assistant 2025.8 runs on.
+          python-version: "3.13"
+      - run: pip install -r requirements_min.txt
+      - run: python -m pytest tests -q
