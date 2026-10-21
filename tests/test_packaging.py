@@ -45,6 +45,11 @@ def test_the_manifest_says_what_hacs_and_hassfest_require():
     # requirement here would be a pip install on a machine that may have no
     # compiler. Empty is deliberate; see needle_engine/VENDOR.md.
     assert manifest["requirements"] == []
+    # The HACS action warns when this is missing and fails on an unknown value.
+    # These are the two core uses for a local model (Ollama) and for voice
+    # (Wyoming).
+    assert manifest["categories"] == ["ai_voice.ai_models",
+                                      "ai_voice.voice_assistants"]
     # The minimum Home Assistant version goes in hacs.json and nowhere else.
     # hassfest rejects a "homeassistant" key in a custom integration's manifest
     # - it is not in CUSTOM_INTEGRATION_MANIFEST_SCHEMA - and the loader never

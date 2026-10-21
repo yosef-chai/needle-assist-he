@@ -1,6 +1,10 @@
 {
   "domain": "needle_assist",
   "name": "Needle Assist (Hebrew)",
+  "categories": [
+    "ai_voice.ai_models",
+    "ai_voice.voice_assistants"
+  ],
   "codeowners": [
     "@Yosef-Chai"
   ],
