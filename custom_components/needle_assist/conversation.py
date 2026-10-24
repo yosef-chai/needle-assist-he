@@ -36,7 +36,7 @@ from homeassistant.helpers import (
     intent,
 )
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import clause_split, repair, reply, slot_match, tool_router
 from .const import (
@@ -74,7 +74,7 @@ ENGINE: Final = "engine failure"
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: NeedleConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the conversation entity."""
     async_add_entities([NeedleConversationEntity(hass, entry)])

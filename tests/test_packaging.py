@@ -116,6 +116,43 @@ def test_the_hebrew_strings_keep_their_direction_marks():
     assert hebrew["issues"]["weights_file_missing"]["title"].startswith(rlm)
 
 
+def test_the_readme_options_table_is_the_options_dialog():
+    """The README listed a token default of 192 after the code moved to 320,
+    and left the utterance log out entirely. The table is checked against what
+    the dialog really shows: one row per field, under the Hebrew label the
+    household sees, in the same order, with the defaults the code uses.
+    """
+    import ast
+    import re
+
+    tree = ast.parse((COMPONENT / "const.py").read_text(encoding="utf-8"))
+    constants = {
+        node.target.id: node.value.value
+        for node in tree.body
+        if isinstance(node, ast.AnnAssign)
+        and isinstance(node.target, ast.Name)
+        and isinstance(node.value, ast.Constant)
+    }
+    fields = json.loads(
+        (COMPONENT / "translations" / "he.json").read_text(encoding="utf-8")
+    )["options"]["step"]["init"]["data"]
+
+    readme = (REPO / "README.md").read_text(encoding="utf-8")
+    section = readme.split("## אפשרויות", 1)[1].split("\n## ", 1)[0]
+    rows = dict(re.findall(r"^\| \*\*(.+?)\*\* \| (.+?) \|", section, re.M))
+
+    assert list(rows) == list(fields.values())
+    defaults = {
+        constants["CONF_MUSIC_PLAYER"]: "ריק",
+        constants["CONF_MAX_TOKENS"]: str(constants["DEFAULT_MAX_TOKENS"]),
+        constants["CONF_LOG_UTTERANCES"]: "כבוי",
+    }
+    assert set(defaults) == set(fields)
+    for key, label in fields.items():
+        assert rows[label] == defaults[key], label
+    assert constants["UTTERANCE_LOG"] in section
+
+
 def test_the_brand_images_are_all_eight_and_are_all_png():
     names = {
         f"{dark}{kind}{scale}.png"
