@@ -28,8 +28,9 @@ def _is_musl():
     if sys.platform != "linux":
         return False
     libc, _ = platform.libc_ver()
+    # Python 3.14 recognises musl here ("musl", "1"); older versions return ("", "")
     if libc:
-        return False
+        return libc == "musl"
     try:
         with open("/proc/self/maps", "rb") as maps:
             return b"musl" in maps.read()

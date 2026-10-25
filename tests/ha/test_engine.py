@@ -272,6 +272,32 @@ def _on_disk(tmp_path: pathlib.Path, payload: bytes) -> pathlib.Path:
     return target
 
 
+@pytest.mark.parametrize(
+    ("libc_ver", "maps", "musl"),
+    [
+        # Python 3.14 on Alpine (Home Assistant OS): libc_ver names musl itself
+        (("musl", "1"), b"", True),
+        (("glibc", "2.41"), b"", False),
+        # Python 3.13 and older on Alpine: libc_ver is empty, /proc/self/maps decides
+        (("", ""), b"7f00 r-xp /lib/ld-musl-x86_64.so.1", True),
+        (("", ""), b"7f00 r-xp /lib/x86_64-linux-gnu/libc.so.6", False),
+    ],
+)
+def test_musl_is_recognised_on_every_python(
+    monkeypatch: pytest.MonkeyPatch, libc_ver: tuple[str, str], maps: bytes, musl: bool
+) -> None:
+    """A glibc wheel on Alpine fails to load: ld-linux-x86-64.so.2 is missing."""
+    from custom_components.needle_assist.needle_engine.agent import fetch
+
+    monkeypatch.setattr(fetch.sys, "platform", "linux")
+    monkeypatch.setattr(fetch.platform, "libc_ver", lambda: libc_ver)
+    monkeypatch.setattr("builtins.open", lambda *a, **k: io.BytesIO(maps))
+    assert fetch._is_musl() is musl
+    monkeypatch.setattr(fetch.platform, "machine", lambda: "x86_64")
+    expected = "musllinux_1_2_x86_64" if musl else "manylinux2014_x86_64"
+    assert fetch._platform_tag() == expected
+
+
 def test_the_wheel_comes_from_one_fixed_commit_not_from_main() -> None:
     """`resolve/main` is whatever the repository holds on the day of install."""
     url = engine_lib._wheel_for_this_machine().url

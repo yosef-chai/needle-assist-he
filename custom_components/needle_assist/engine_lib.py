@@ -252,7 +252,8 @@ async def async_ensure_library(hass: HomeAssistant, config_path: str) -> str:
         _LOGGER.debug("engine already present at %s", target)
         return str(target)
 
-    wheel = _wheel_for_this_machine()
+    # platform.libc_ver() reads the interpreter binary: not on the event loop
+    wheel = await hass.async_add_executor_job(_wheel_for_this_machine)
     _LOGGER.info("fetching Needle engine %s for %s", ENGINE_VERSION, wheel.tag)
     try:
         response = await async_get_clientsession(hass).get(
